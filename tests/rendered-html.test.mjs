@@ -489,6 +489,8 @@ test("includes offline launchers and GitHub-built Windows packages", async () =>
   assert.match(windowsLauncher, /127\.0\.0\.1:3784/);
   assert.match(portableBuilder, /BOMLens\.exe/);
   assert.match(portableBuilder, /runtime\\node\.exe/);
+  assert.match(portableBuilder, /Framework64\\v4\.0\.30319\\csc\.exe/);
+  assert.match(portableBuilder, /\/platform:x64/);
   assert.match(portableBuilder, /Compress-Archive/);
   assert.match(portableBuilder, /BOMLens-Windows-x64-Portable\.zip/);
   assert.match(installer, /PrivilegesRequired=lowest/);

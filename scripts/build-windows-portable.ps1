@@ -83,7 +83,13 @@ public static class BOMLensLauncher {
 '@
 
 $launcher = Join-Path $packageRoot "BOMLens.exe"
-Add-Type -TypeDefinition $launcherSource -Language CSharp -OutputAssembly $launcher -OutputType WindowsApplication -ReferencedAssemblies @("System.Windows.Forms", "System.Drawing", "System.Net")
+$launcherSourceFile = Join-Path $outputRoot "BOMLensLauncher.cs"
+$compiler = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+if (-not (Test-Path $compiler)) { throw "找不到 Windows 64 位元 C# 編譯器：$compiler" }
+$launcherSource | Set-Content $launcherSourceFile -Encoding UTF8
+& $compiler /nologo /target:winexe /platform:x64 "/out:$launcher" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll $launcherSourceFile
+if ($LASTEXITCODE -ne 0) { throw "BOMLens.exe 編譯失敗。" }
+Remove-Item $launcherSourceFile -Force
 
 if ($CertificateThumbprint) {
   $certificate = Get-ChildItem "Cert:\CurrentUser\My\$CertificateThumbprint" -ErrorAction Stop
