@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { analyzeCompanyBomMatrix, canonicalPartNumber, compareBom, findCompanyHeader, parseCompanyBomMatrix, parseQuantity, sortBomDiffsForAll } from "../app/bom-logic.ts";
-import { buildPageReferenceIndex, findReferenceHits, lookupReferenceHits, normalizeReference } from "../app/pdf-search.ts";
+import { buildPageReferenceIndex, centeredPdfHitScroll, findReferenceHits, lookupReferenceHits, normalizeReference } from "../app/pdf-search.ts";
 import * as XLSX from "xlsx";
 
 async function render() {
@@ -185,6 +185,26 @@ test("merges vertically split and rotated schematic references", () => {
   assert.equal(lookupReferenceHits(index, "U45")[0].rotation, 90);
 });
 
+test("centers schematic reference hits and clamps page-edge positions", () => {
+  const center = centeredPdfHitScroll(
+    { page: 1, text: "U45", x: 900, y: 600, width: 20, height: 10 },
+    1.35, 400, 300, 1200, 900,
+  );
+  assert.deepEqual(center, { left: 710, top: 455 });
+
+  const topLeft = centeredPdfHitScroll(
+    { page: 1, text: "U1", x: 5, y: 5, width: 10, height: 10 },
+    1.35, 400, 300, 1200, 900,
+  );
+  assert.deepEqual(topLeft, { left: 0, top: 0 });
+
+  const bottomRight = centeredPdfHitScroll(
+    { page: 1, text: "U99", x: 1180, y: 880, width: 20, height: 20 },
+    1.35, 400, 300, 1200, 900,
+  );
+  assert.deepEqual(bottomRight, { left: 800, top: 600 });
+});
+
 test("progressively indexes and caches schematic PDFs", async () => {
   const viewer = await readFile(new URL("../app/pdf-schematic-viewer.tsx", import.meta.url), "utf8");
   assert.match(viewer, /Map<File, IndexEntry>/);
@@ -198,6 +218,8 @@ test("progressively indexes and caches schematic PDFs", async () => {
   assert.match(viewer, /entry\.document\?\.destroy/);
   assert.match(viewer, /syncState\.source === side/);
   assert.match(viewer, /onScaleChange/);
+  assert.match(viewer, /centeredPdfHitScroll/);
+  assert.match(viewer, /currentHit\?\.page === pageNumber/);
 });
 
 test("maps company columns by header name and groups substitute parts", () => {

@@ -1,6 +1,29 @@
 export type PdfTextBox = { page: number; text: string; x: number; y: number; width: number; height: number; rotation?: number };
 export type PdfReferenceIndex = Map<string, PdfTextBox[]>;
 
+export const PDF_REFERENCE_INDEX_SCALE = 1.35;
+
+export function centeredPdfHitScroll(
+  hit: PdfTextBox,
+  renderScale: number,
+  viewportWidth: number,
+  viewportHeight: number,
+  contentWidth: number,
+  contentHeight: number,
+  pageLeft = 0,
+  pageTop = 0,
+) {
+  const scaleFactor = renderScale / PDF_REFERENCE_INDEX_SCALE;
+  const hitCenterX = pageLeft + (hit.x + hit.width / 2) * scaleFactor;
+  const hitCenterY = pageTop + (hit.y + hit.height / 2) * scaleFactor;
+  const maxLeft = Math.max(0, contentWidth - viewportWidth);
+  const maxTop = Math.max(0, contentHeight - viewportHeight);
+  return {
+    left: Math.min(maxLeft, Math.max(0, hitCenterX - viewportWidth / 2)),
+    top: Math.min(maxTop, Math.max(0, hitCenterY - viewportHeight / 2)),
+  };
+}
+
 const referencePattern = /^[A-Z]{1,6}\d+[A-Z]?$/;
 
 export function normalizeReference(value: string) {

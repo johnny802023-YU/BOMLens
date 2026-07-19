@@ -5,7 +5,7 @@ import { ChevronLeft, ChevronRight, FileSearch } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
-import { buildPageReferenceIndex, lookupReferenceHits, mergeReferenceIndex, normalizeReference, type PdfReferenceIndex, type PdfTextBox } from "./pdf-search";
+import { buildPageReferenceIndex, centeredPdfHitScroll, lookupReferenceHits, mergeReferenceIndex, normalizeReference, PDF_REFERENCE_INDEX_SCALE, type PdfReferenceIndex, type PdfTextBox } from "./pdf-search";
 
 type IndexStatus = "indexing" | "ready" | "no-text" | "error";
 export type PdfViewerSide = "before" | "after";
@@ -77,7 +77,7 @@ async function startProgressiveIndex(file: File, entry: IndexEntry) {
       const pageNumbers = Array.from({ length: Math.min(entry.batchSize, entry.document.numPages - firstPage + 1) }, (_, index) => firstPage + index);
       const results = await Promise.all(pageNumbers.map(async (pageNumber) => {
         const page = await entry.document!.getPage(pageNumber);
-        const viewport = page.getViewport({ scale: 1.35 });
+        const viewport = page.getViewport({ scale: PDF_REFERENCE_INDEX_SCALE });
         const content = await page.getTextContent();
         const boxes: PdfTextBox[] = [];
         content.items.forEach((rawItem) => {
@@ -115,6 +115,7 @@ async function startProgressiveIndex(file: File, entry: IndexEntry) {
 
 export function PdfSchematicViewer({ file, target, sideLabel, side, scale, syncEnabled, syncState, onScaleChange, onSyncScroll }: { file: File; target: string; sideLabel: string; side: PdfViewerSide; scale: number; syncEnabled: boolean; syncState: PdfScrollSync; onScaleChange: (side: PdfViewerSide, scale: number) => void; onSyncScroll: (side: PdfViewerSide, x: number, y: number) => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const renderTask = useRef<{ cancel(): void } | null>(null);
   const applyingSyncedScroll = useRef(false);
@@ -161,6 +162,7 @@ export function PdfSchematicViewer({ file, target, sideLabel, side, scale, syncE
 
   const normalizedTarget = normalizeReference(target);
   const hits = useMemo(() => lookupReferenceHits(referenceIndex, normalizedTarget), [referenceIndex, normalizedTarget]);
+  const currentHit = hits[hitIndex];
 
   useEffect(() => {
     locatedTarget.current = "";
@@ -191,8 +193,30 @@ export function PdfSchematicViewer({ file, target, sideLabel, side, scale, syncE
       window.requestAnimationFrame(() => {
         const element = scrollRef.current;
         if (!element) return;
-        element.scrollLeft = lastScrollRatio.current.x * Math.max(0, element.scrollWidth - element.clientWidth);
-        element.scrollTop = lastScrollRatio.current.y * Math.max(0, element.scrollHeight - element.clientHeight);
+        if (currentHit?.page === pageNumber) {
+          const pageElement = pageRef.current;
+          const centered = centeredPdfHitScroll(
+            currentHit,
+            scale,
+            element.clientWidth,
+            element.clientHeight,
+            element.scrollWidth,
+            element.scrollHeight,
+            pageElement?.offsetLeft ?? 0,
+            pageElement?.offsetTop ?? 0,
+          );
+          applyingSyncedScroll.current = true;
+          element.scrollLeft = centered.left;
+          element.scrollTop = centered.top;
+          lastScrollRatio.current = {
+            x: centered.left / Math.max(1, element.scrollWidth - element.clientWidth),
+            y: centered.top / Math.max(1, element.scrollHeight - element.clientHeight),
+          };
+          window.requestAnimationFrame(() => { applyingSyncedScroll.current = false; });
+        } else {
+          element.scrollLeft = lastScrollRatio.current.x * Math.max(0, element.scrollWidth - element.clientWidth);
+          element.scrollTop = lastScrollRatio.current.y * Math.max(0, element.scrollHeight - element.clientHeight);
+        }
       });
       renderTask.current?.cancel();
       const task = page.render({ canvas, canvasContext: context, viewport });
@@ -200,7 +224,7 @@ export function PdfSchematicViewer({ file, target, sideLabel, side, scale, syncE
       task.promise.catch((error) => { if (error?.name !== "RenderingCancelledException") setRenderError(true); });
     });
     return () => renderTask.current?.cancel();
-  }, [document, pageNumber, scale]);
+  }, [currentHit, document, pageNumber, scale]);
 
   useEffect(() => {
     const element = scrollRef.current;
@@ -225,7 +249,6 @@ export function PdfSchematicViewer({ file, target, sideLabel, side, scale, syncE
     });
   };
 
-  const currentHit = hits[hitIndex];
   const selectHit = (nextIndex: number) => {
     const normalized = (nextIndex + hits.length) % hits.length;
     setHitIndex(normalized);
@@ -244,9 +267,9 @@ export function PdfSchematicViewer({ file, target, sideLabel, side, scale, syncE
       {hits.length > 1 && <div className="hit-controls"><button onClick={() => selectHit(hitIndex - 1)}>上一筆</button><span>{hitIndex + 1}／{hits.length}</span><button onClick={() => selectHit(hitIndex + 1)}>下一筆</button></div>}
     </div>
     <div className="pdf-page-scroll" ref={scrollRef} onScroll={handleScroll}>
-      <div className="pdf-page" style={{ width: pageSize.width, height: pageSize.height }}>
+      <div className="pdf-page" ref={pageRef} style={{ width: pageSize.width, height: pageSize.height }}>
         <canvas ref={canvasRef} />
-        {currentHit?.page === pageNumber && <span className="pdf-highlight" style={{ left: Math.max(0, (currentHit.x - 5) * scale / 1.35), top: Math.max(0, (currentHit.y - 4) * scale / 1.35), width: (currentHit.width + 10) * scale / 1.35, height: (currentHit.height + 8) * scale / 1.35 }} />}
+        {currentHit?.page === pageNumber && <span className="pdf-highlight" style={{ left: Math.max(0, (currentHit.x - 5) * scale / PDF_REFERENCE_INDEX_SCALE), top: Math.max(0, (currentHit.y - 4) * scale / PDF_REFERENCE_INDEX_SCALE), width: (currentHit.width + 10) * scale / PDF_REFERENCE_INDEX_SCALE, height: (currentHit.height + 8) * scale / PDF_REFERENCE_INDEX_SCALE }} />}
       </div>
     </div>
   </div>;
