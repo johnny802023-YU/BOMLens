@@ -476,6 +476,21 @@ test("locks the local app to same-origin resources and disables sensitive permis
   assert.match(page, /在線路圖定位/);
 });
 
+test("supports collapsing the desktop sidebar without changing the mobile menu", async () => {
+  const [page, css] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  assert.match(page, /sidebarCollapsed/);
+  assert.match(page, /收折側邊選單/);
+  assert.match(page, /展開側邊選單/);
+  assert.match(page, /aria-expanded/);
+  assert.match(css, /\.sidebar\.collapsed/);
+  assert.match(css, /\.workspace\.sidebar-collapsed/);
+  assert.match(css, /@media \(min-width: 761px\)/);
+  assert.match(css, /@media \(max-width: 760px\)/);
+});
+
 test("includes offline launchers and GitHub-built Windows packages", async () => {
   const [macLauncher, windowsLauncher, portableBuilder, offlineServer, installer, workflow, packageJson] = await Promise.all([
     readFile(new URL("../scripts/start-offline.command", import.meta.url), "utf8"),

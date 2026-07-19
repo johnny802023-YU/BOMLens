@@ -13,6 +13,8 @@ import {
   History,
   Image as ImageIcon,
   Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   Search,
   ShieldCheck,
@@ -139,6 +141,7 @@ export default function Home() {
   const [diffImage, setDiffImage] = useState<string | null>(null);
   const [imageBusy, setImageBusy] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   const [beforeAudit, setBeforeAudit] = useState<ImportRecord | null>(null);
   const [afterAudit, setAfterAudit] = useState<ImportRecord | null>(null);
@@ -303,21 +306,22 @@ export default function Home() {
 
   return (
     <main className="app-shell">
-      <aside className={`sidebar ${mobileNav ? "open" : ""}`}>
-        <div className="brand"><span className="brand-mark"><CircuitBoard size={21} /></span><span>BOM<span>Lens</span></span></div>
-        <button className="new-compare" onClick={resetComparison}><Plus size={18} /> 新增比對</button>
+      <aside className={`sidebar ${sidebarCollapsed ? "collapsed" : ""} ${mobileNav ? "open" : ""}`}>
+        <button className="sidebar-collapse" onClick={() => setSidebarCollapsed((collapsed) => !collapsed)} aria-label={sidebarCollapsed ? "展開側邊選單" : "收折側邊選單"} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? "展開側邊選單" : "收折側邊選單"}>{sidebarCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}</button>
+        <div className="brand"><span className="brand-mark"><CircuitBoard size={21} /></span><span className="brand-text">BOM<span>Lens</span></span></div>
+        <button className="new-compare" title="新增比對" onClick={resetComparison}><Plus size={18} /><span className="sidebar-text">新增比對</span></button>
         <nav>
           <p className="nav-label">工作區</p>
-          <button className="nav-item active"><GitCompareArrows size={18} /> 目前比對 <span>1</span></button>
-          <button className="nav-item" onClick={() => setSessionOpen(true)}><History size={18} /> 此次工作階段 <span>{sessionRecords.length}</span></button>
+          <button className="nav-item active" title="目前比對"><GitCompareArrows size={18} /><span className="sidebar-text">目前比對</span><span className="nav-count">1</span></button>
+          <button className="nav-item" title="此次工作階段" onClick={() => setSessionOpen(true)}><History size={18} /><span className="sidebar-text">此次工作階段</span><span className="nav-count">{sessionRecords.length}</span></button>
           <p className="nav-label recent-label">資料保護</p>
           <div className="privacy-nav"><ShieldCheck size={17} /><div><strong>完全本機處理</strong><small>不登入・不上傳・不留存</small></div></div>
         </nav>
-        <div className="sidebar-footer"><div className="avatar"><ShieldCheck size={16} /></div><div><strong>離線工作階段</strong><small>127.0.0.1 本機限定</small></div></div>
+        <div className="sidebar-footer"><div className="avatar"><ShieldCheck size={16} /></div><div className="sidebar-footer-text"><strong>離線工作階段</strong><small>127.0.0.1 本機限定</small></div></div>
       </aside>
       {mobileNav && <button className="nav-scrim" aria-label="關閉選單" onClick={() => setMobileNav(false)} />}
 
-      <section className="workspace">
+      <section className={`workspace ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
         <header className="topbar">
           <button className="mobile-menu" onClick={() => setMobileNav(true)} aria-label="開啟選單"><Menu /></button>
           <div><div className="breadcrumb">本機工具 <span>/</span> BOM 版本比對</div><h1>版本比對 <span className="version-pill">{beforeName || "前版"} → {afterName || "後版"}</span></h1></div>

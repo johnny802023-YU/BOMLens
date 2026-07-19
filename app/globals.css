@@ -23,7 +23,9 @@ button, input, select { font: inherit; }
 button { cursor: pointer; }
 
 .app-shell { min-height: 100vh; display: flex; }
-.sidebar { width: 238px; position: fixed; inset: 0 auto 0 0; z-index: 30; background: var(--navy); color: #d9e0eb; padding: 25px 16px 18px; display: flex; flex-direction: column; }
+.sidebar { width: 238px; position: fixed; inset: 0 auto 0 0; z-index: 30; background: var(--navy); color: #d9e0eb; padding: 25px 16px 18px; display: flex; flex-direction: column; transition: width .2s ease, padding .2s ease, transform .2s ease; }
+.sidebar-collapse { display: none; position: absolute; z-index: 2; top: 30px; right: -14px; width: 28px; height: 28px; padding: 0; align-items: center; justify-content: center; border: 1px solid #33445f; border-radius: 7px; color: #9fb0ca; background: #17243a; box-shadow: 0 3px 10px rgba(0,0,0,.22); }
+.sidebar-collapse:hover { color: white; border-color: #5577ab; background: #223552; }
 .brand { height: 43px; display: flex; align-items: center; gap: 10px; padding: 0 7px; color: white; font-weight: 750; font-size: 20px; letter-spacing: -.5px; }
 .brand > span:last-child span { color: #71a1ff; }
 .brand-mark { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid #3f6ec7; border-radius: 9px; color: #8cb2ff; background: #182844; }
@@ -33,7 +35,7 @@ button { cursor: pointer; }
 .recent-label { margin-top: 28px; }
 .nav-item { width: 100%; height: 40px; display: flex; align-items: center; gap: 11px; border: 0; padding: 0 11px; border-radius: 7px; background: transparent; color: #aeb8c9; text-align: left; font-size: 13px; }
 .nav-item.active { color: white; background: #1c2a41; }
-.nav-item span { margin-left: auto; min-width: 22px; padding: 2px 6px; border-radius: 10px; background: #29436f; color: #9dc0ff; font-size: 10px; text-align: center; }
+.nav-item .nav-count { margin-left: auto; min-width: 22px; padding: 2px 6px; border-radius: 10px; background: #29436f; color: #9dc0ff; font-size: 10px; text-align: center; }
 .recent-item { position: relative; width: 100%; border: 0; background: transparent; color: #d2d8e3; padding: 9px 6px 9px 26px; display: flex; flex-direction: column; align-items: flex-start; font-size: 12px; line-height: 1.5; }
 .recent-item small { color: #778298; }
 .status-dot { position: absolute; left: 9px; top: 15px; width: 6px; height: 6px; border-radius: 50%; }
@@ -50,7 +52,7 @@ button { cursor: pointer; }
 .privacy-nav strong { color: #d9f5e9; font-size: 10px; }
 .privacy-nav small { color: #78978d; font-size: 8px; }
 
-.workspace { margin-left: 238px; width: calc(100% - 238px); min-width: 0; }
+.workspace { margin-left: 238px; width: calc(100% - 238px); min-width: 0; transition: margin-left .2s ease, width .2s ease; }
 .topbar { min-height: 82px; padding: 15px 31px; background: white; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .breadcrumb { font-size: 10px; color: #8c95a5; margin-bottom: 6px; }
 .breadcrumb span { padding: 0 5px; color: #c1c7d0; }
@@ -64,6 +66,24 @@ button { cursor: pointer; }
 .primary { border: 1px solid var(--blue); background: var(--blue); color: white; }
 .primary:hover { background: var(--blue-dark); }
 .mobile-menu { display: none; border: 0; background: transparent; }
+
+@media (min-width: 761px) {
+  .sidebar-collapse { display: flex; }
+  .sidebar.collapsed { width: 76px; padding-inline: 12px; }
+  .sidebar.collapsed .brand { justify-content: center; padding-inline: 0; }
+  .sidebar.collapsed .brand-text,
+  .sidebar.collapsed .sidebar-text,
+  .sidebar.collapsed .nav-count,
+  .sidebar.collapsed .nav-label,
+  .sidebar.collapsed .privacy-nav > div,
+  .sidebar.collapsed .sidebar-footer-text { display: none; }
+  .sidebar.collapsed .new-compare { width: 42px; margin-inline: auto; padding: 0; }
+  .sidebar.collapsed .nav-item { justify-content: center; padding: 0; }
+  .sidebar.collapsed .nav-item svg { flex: 0 0 auto; }
+  .sidebar.collapsed .privacy-nav { width: 42px; min-height: 42px; margin-inline: auto; padding: 0; align-items: center; justify-content: center; }
+  .sidebar.collapsed .sidebar-footer { justify-content: center; padding-inline: 0; }
+  .workspace.sidebar-collapsed { margin-left: 76px; width: calc(100% - 76px); }
+}
 
 .content { max-width: 1460px; margin: 0 auto; padding: 23px 30px 40px; }
 .privacy-banner { min-height: 56px; margin-bottom: 13px; padding: 10px 15px; display: flex; align-items: center; gap: 11px; border: 1px solid #b9e4d1; border-radius: 9px; background: #edf9f4; color: #187b59; }
