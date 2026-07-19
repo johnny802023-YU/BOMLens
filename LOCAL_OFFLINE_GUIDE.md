@@ -40,13 +40,24 @@
 
 Mac 的 `node_modules` 不能複製到 Windows 使用；Windows 電腦第一次使用時，必須在專案資料夾重新執行一次 `npm ci`。
 
-## Windows 正式可攜版（建議公司內部派送）
+## 從 GitHub 下載 Windows 成品（不需要 Node.js）
+
+專案的 GitHub Actions 會在 Windows runner 使用 Node.js 22 完成建置與測試，並提供兩個可下載的 workflow artifacts：
+
+- `BOMLens-Windows-x64-Portable`：內含 `BOMLens-Windows-x64-Portable.zip`，解壓縮後直接雙擊 `BOMLens.exe`，不需管理員權限。
+- `BOMLens-Setup-x64`：內含 `BOMLens-Setup-x64.exe`，使用每位使用者的安裝精靈，安裝到目前帳號的 Local AppData，並建立桌面與開始功能表捷徑。
+
+在 GitHub repository 開啟 `Actions` → `Build Windows packages` → 選擇成功的執行紀錄，於頁面最下方下載 Artifacts。Artifacts 保留 30 天。下載後可用同一個 artifact 內的 `SHA256SUMS.txt` 核對檔案完整性。
+
+GitHub runner 需要 Node.js 是為了「建置」；上述 ZIP 與 Setup EXE 都已包含 Windows Node.js runtime，實際使用的公司電腦不需要安裝 Node.js，也不需要連網。
+
+## Windows 正式可攜版（自行在 Windows 建置）
 
 IT 人員在一台 Windows 建置電腦完成 `npm ci` 後，執行：
 
 `npm run package:windows`
 
-程式會產生 `release\BOMLens-Windows-Portable.zip`。將它解壓縮後，使用者直接雙擊 `BOMLens.exe` 即可，不需要另外安裝 Node.js、不需要管理員權限，也不會連上外部網站。程式啟動後會出現在 Windows 通知區，可從通知區選擇「開啟 BOMLens」或「結束」。
+程式會產生 `release\BOMLens-Windows-x64-Portable.zip`。將它解壓縮後，使用者直接雙擊 `BOMLens.exe` 即可，不需要另外安裝 Node.js、不需要管理員權限，也不會連上外部網站。程式啟動後會出現在 Windows 通知區，可從通知區選擇「開啟 BOMLens」或「結束」。
 
 若公司有程式碼簽章憑證，可用以下方式建立已簽章版本：
 
@@ -54,8 +65,8 @@ IT 人員在一台 Windows 建置電腦完成 `npm ci` 後，執行：
 
 可攜版必須在 Windows 上建立，不能直接把 Mac 的套件資料夾複製到 Windows。
 
-## 第一次安裝
+## 從原始碼第一次建置
 
 電腦需有 Node.js 22 或更新版本，並需先執行一次 `npm ci` 安裝程式套件。套件準備完成後，日常使用不需要網路。
 
-若公司政策不允許安裝 Node.js，下一步應改包成公司簽署的桌面應用程式，再由 IT 部門派送。
+若公司電腦不允許安裝 Node.js，請直接下載 GitHub Actions 產生的 Portable ZIP 或 Setup EXE，不要在該電腦從原始碼建置。

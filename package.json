@@ -12,6 +12,7 @@
     "offline": "npm run build && npm run offline:serve",
     "offline:serve": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start --hostname 127.0.0.1 --port 3784",
     "package:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows-portable.ps1",
+    "package:windows:setup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"& 'C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe' scripts\\BOMLens.iss\"",
     "test": "npm run build && node --test tests/rendered-html.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"

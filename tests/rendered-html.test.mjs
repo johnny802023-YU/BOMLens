@@ -476,11 +476,13 @@ test("locks the local app to same-origin resources and disables sensitive permis
   assert.match(page, /在線路圖定位/);
 });
 
-test("includes double-click offline launchers for macOS and Windows", async () => {
-  const [macLauncher, windowsLauncher, portableBuilder, packageJson] = await Promise.all([
+test("includes offline launchers and GitHub-built Windows packages", async () => {
+  const [macLauncher, windowsLauncher, portableBuilder, installer, workflow, packageJson] = await Promise.all([
     readFile(new URL("../scripts/start-offline.command", import.meta.url), "utf8"),
     readFile(new URL("../scripts/start-offline.bat", import.meta.url), "utf8"),
     readFile(new URL("../scripts/build-windows-portable.ps1", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/BOMLens.iss", import.meta.url), "utf8"),
+    readFile(new URL("../.github/workflows/build-windows.yml", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
   assert.match(macLauncher, /127\.0\.0\.1:3784/);
@@ -488,6 +490,15 @@ test("includes double-click offline launchers for macOS and Windows", async () =
   assert.match(portableBuilder, /BOMLens\.exe/);
   assert.match(portableBuilder, /runtime\\node\.exe/);
   assert.match(portableBuilder, /Compress-Archive/);
+  assert.match(portableBuilder, /BOMLens-Windows-x64-Portable\.zip/);
+  assert.match(installer, /PrivilegesRequired=lowest/);
+  assert.match(installer, /\{autodesktop\}/);
+  assert.match(installer, /BOMLens-Setup-x64/);
+  assert.match(workflow, /runs-on: windows-latest/);
+  assert.match(workflow, /actions\/setup-node@v4/);
+  assert.match(workflow, /actions\/upload-artifact@v4/);
+  assert.match(workflow, /Verify portable runtime/);
+  assert.match(workflow, /Verify setup installer/);
   assert.match(packageJson, /package:windows/);
   assert.match(windowsLauncher, /Invoke-WebRequest/);
   assert.match(windowsLauncher, /call npm run offline:serve/);

@@ -1,0 +1,125 @@
+name: Build Windows packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - codex/publish-bomlens
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Windows x64 packages
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate source
+        run: |
+          npm run lint
+          npm test
+
+      - name: Build portable package
+        shell: powershell
+        run: ./scripts/build-windows-portable.ps1 -SkipBuild
+
+      - name: Verify portable runtime
+        shell: powershell
+        run: |
+          $root = Resolve-Path "release/BOMLens-Windows-x64-Portable"
+          $node = Join-Path $root "runtime/node.exe"
+          $cli = Join-Path $root "node_modules/vinext/dist/cli.js"
+          if (-not (Test-Path (Join-Path $root "BOMLens.exe"))) { throw "BOMLens.exe 不存在。" }
+          $server = Start-Process -FilePath $node -ArgumentList @($cli, "start", "--hostname", "127.0.0.1", "--port", "3784") -WorkingDirectory $root -WindowStyle Hidden -PassThru
+          try {
+            $ready = $false
+            foreach ($attempt in 1..40) {
+              try {
+                $response = Invoke-WebRequest "http://127.0.0.1:3784/" -UseBasicParsing -TimeoutSec 2
+                if ($response.StatusCode -eq 200) { $ready = $true; break }
+              } catch {
+                Start-Sleep -Milliseconds 500
+              }
+            }
+            if (-not $ready) { throw "Portable 本機服務未能在時限內啟動。" }
+          } finally {
+            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Locate Inno Setup
+        id: inno
+        shell: powershell
+        run: |
+          $compiler = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $compiler) {
+            choco install innosetup --no-progress -y
+            $compiler = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          }
+          if (-not (Test-Path $compiler)) { throw "找不到 Inno Setup 編譯器。" }
+          "compiler=$compiler" >> $env:GITHUB_OUTPUT
+
+      - name: Build setup installer
+        shell: powershell
+        run: '& "${{ steps.inno.outputs.compiler }}" scripts/BOMLens.iss'
+
+      - name: Verify setup installer
+        shell: powershell
+        run: |
+          $setup = Resolve-Path "release/BOMLens-Setup-x64.exe"
+          $process = Start-Process -FilePath $setup -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "安裝程式測試失敗，ExitCode=$($process.ExitCode)" }
+          $installed = Join-Path $env:LOCALAPPDATA "Programs/BOMLens/BOMLens.exe"
+          if (-not (Test-Path $installed)) { throw "安裝後找不到 BOMLens.exe。" }
+
+      - name: Create checksums
+        shell: powershell
+        run: |
+          $files = @(
+            "release/BOMLens-Windows-x64-Portable.zip",
+            "release/BOMLens-Setup-x64.exe"
+          )
+          $lines = foreach ($file in $files) {
+            $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $([IO.Path]::GetFileName($file))"
+          }
+          $lines | Set-Content "release/SHA256SUMS.txt" -Encoding ascii
+
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: BOMLens-Windows-x64-Portable
+          path: |
+            release/BOMLens-Windows-x64-Portable.zip
+            release/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload setup EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: BOMLens-Setup-x64
+          path: |
+            release/BOMLens-Setup-x64.exe
+            release/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30

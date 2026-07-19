@@ -11,6 +11,7 @@ BOMLens 是供公司內部使用的離線 BOM 與線路圖版本比對工具。�
 - PDF 文字索引、分批處理、旋轉文字辨識、同步縮放與移動及本機快取管理
 - 匯出易讀的 Excel 差異報告與獨立 HTML 報告
 - Windows 離線啟動與可攜式封裝
+- GitHub Actions 自動產生 Windows x64 Portable ZIP 與 Setup EXE
 
 ## 本機執行
 
@@ -28,6 +29,13 @@ Windows 可直接執行：
 ```text
 scripts\start-offline.bat
 ```
+
+如果 Windows 電腦沒有 Node.js，請從 GitHub Actions 的 `Build Windows packages` 成功紀錄下載：
+
+- `BOMLens-Windows-x64-Portable`
+- `BOMLens-Setup-x64`
+
+兩種版本都已包含 Windows Node.js runtime，使用端不需另外安裝 Node.js。Setup 採每位使用者安裝，不需管理員權限，並會建立桌面捷徑。
 
 ## 驗證
 

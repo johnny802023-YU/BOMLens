@@ -1,19 +1,25 @@
 param(
   [string]$OutputDirectory = "release",
-  [string]$CertificateThumbprint = ""
+  [string]$CertificateThumbprint = "",
+  [switch]$SkipBuild
 )
 
 $ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
 $project = Split-Path -Parent $PSScriptRoot
 $outputRoot = Join-Path $project $OutputDirectory
-$packageRoot = Join-Path $outputRoot "BOMLens-Windows-Portable"
+$packageRoot = Join-Path $outputRoot "BOMLens-Windows-x64-Portable"
 
 Set-Location $project
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw "建置電腦需要先安裝 Node.js 22 或更新版本。" }
 if (-not (Test-Path "node_modules")) { throw "找不到 node_modules，請先執行 npm ci。" }
 
-& npm run build
-if ($LASTEXITCODE -ne 0) { throw "BOMLens 建置失敗。" }
+if (-not $SkipBuild) {
+  & npm run build
+  if ($LASTEXITCODE -ne 0) { throw "BOMLens 建置失敗。" }
+} elseif (-not (Test-Path "dist")) {
+  throw "使用 -SkipBuild 時必須已存在 dist，請先執行 npm run build。"
+}
 
 Remove-Item $packageRoot -Recurse -Force -ErrorAction SilentlyContinue
 New-Item $packageRoot -ItemType Directory -Force | Out-Null
@@ -84,7 +90,7 @@ if ($CertificateThumbprint) {
   Set-AuthenticodeSignature -FilePath $launcher -Certificate $certificate -TimestampServer "http://timestamp.digicert.com" | Out-Null
 }
 
-$zip = Join-Path $outputRoot "BOMLens-Windows-Portable.zip"
+$zip = Join-Path $outputRoot "BOMLens-Windows-x64-Portable.zip"
 Remove-Item $zip -Force -ErrorAction SilentlyContinue
 Compress-Archive -Path "$packageRoot\*" -DestinationPath $zip -CompressionLevel Optimal
 Write-Host "完成：$zip"
