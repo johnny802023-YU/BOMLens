@@ -24,7 +24,6 @@ CloseApplications=yes
 RestartApplications=no
 
 [Languages]
-Name: "chinesetraditional"; MessagesFile: "compiler:Languages\ChineseTraditional.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
