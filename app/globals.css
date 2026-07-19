@@ -1,6 +1,9 @@
 @import "tailwindcss";
 
+/* Offline asset revision: force Windows browsers to fetch the verified stylesheet. */
+
 :root {
+  --offline-asset-revision: 2;
   --ink: #172032;
   --muted: #697386;
   --line: #e5e9f0;

@@ -477,10 +477,11 @@ test("locks the local app to same-origin resources and disables sensitive permis
 });
 
 test("includes offline launchers and GitHub-built Windows packages", async () => {
-  const [macLauncher, windowsLauncher, portableBuilder, installer, workflow, packageJson] = await Promise.all([
+  const [macLauncher, windowsLauncher, portableBuilder, offlineServer, installer, workflow, packageJson] = await Promise.all([
     readFile(new URL("../scripts/start-offline.command", import.meta.url), "utf8"),
     readFile(new URL("../scripts/start-offline.bat", import.meta.url), "utf8"),
     readFile(new URL("../scripts/build-windows-portable.ps1", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/offline-server.mjs", import.meta.url), "utf8"),
     readFile(new URL("../scripts/BOMLens.iss", import.meta.url), "utf8"),
     readFile(new URL("../.github/workflows/build-windows.yml", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
@@ -493,6 +494,9 @@ test("includes offline launchers and GitHub-built Windows packages", async () =>
   assert.match(portableBuilder, /\/platform:x64/);
   assert.match(portableBuilder, /Compress-Archive/);
   assert.match(portableBuilder, /BOMLens-Windows-x64-Portable\.zip/);
+  assert.match(portableBuilder, /offline-server\.mjs/);
+  assert.match(offlineServer, /noCompression: true/);
+  assert.match(offlineServer, /host: "127\.0\.0\.1"/);
   assert.match(installer, /PrivilegesRequired=lowest/);
   assert.match(installer, /\{autodesktop\}/);
   assert.match(installer, /BOMLens-Setup-x64/);
@@ -500,6 +504,8 @@ test("includes offline launchers and GitHub-built Windows packages", async () =>
   assert.match(workflow, /actions\/setup-node@v4/);
   assert.match(workflow, /actions\/upload-artifact@v4/);
   assert.match(workflow, /Verify portable runtime/);
+  assert.match(workflow, /Stylesheet 內容不完整/);
+  assert.match(workflow, /\\\.app-shell/);
   assert.match(workflow, /Verify setup installer/);
   assert.match(packageJson, /package:windows/);
   assert.match(windowsLauncher, /Invoke-WebRequest/);

@@ -29,6 +29,7 @@ Copy-Item "dist" (Join-Path $packageRoot "dist") -Recurse
 Copy-Item "node_modules" (Join-Path $packageRoot "node_modules") -Recurse
 if (Test-Path "public") { Copy-Item "public" (Join-Path $packageRoot "public") -Recurse }
 Copy-Item "package.json" (Join-Path $packageRoot "package.json")
+Copy-Item "scripts\offline-server.mjs" (Join-Path $packageRoot "offline-server.mjs")
 Copy-Item (Get-Command node).Source (Join-Path $packageRoot "runtime\node.exe")
 Copy-Item "LOCAL_OFFLINE_GUIDE.md" (Join-Path $packageRoot "使用說明.md")
 
@@ -47,17 +48,18 @@ public static class BOMLensLauncher {
   public static void Main() {
     string root = AppDomain.CurrentDomain.BaseDirectory;
     string node = Path.Combine(root, "runtime", "node.exe");
-    string cli = Path.Combine(root, "node_modules", "vinext", "dist", "cli.js");
-    if (!File.Exists(node) || !File.Exists(cli)) {
+    string serverEntry = Path.Combine(root, "offline-server.mjs");
+    if (!File.Exists(node) || !File.Exists(serverEntry)) {
       MessageBox.Show("BOMLens 可攜式檔案不完整，請重新解壓縮。", "BOMLens", MessageBoxButtons.OK, MessageBoxIcon.Error);
       return;
     }
-    var info = new ProcessStartInfo(node, "\"" + cli + "\" start --hostname 127.0.0.1 --port 3784") {
+    var info = new ProcessStartInfo(node, "\"" + serverEntry + "\"") {
       WorkingDirectory = root,
       UseShellExecute = false,
       CreateNoWindow = true,
       WindowStyle = ProcessWindowStyle.Hidden
     };
+    info.EnvironmentVariables["BOMLENS_PORT"] = "3784";
     info.EnvironmentVariables["WRANGLER_LOG_PATH"] = Path.Combine(root, ".wrangler", "wrangler.log");
     server = Process.Start(info);
     Application.EnableVisualStyles();
