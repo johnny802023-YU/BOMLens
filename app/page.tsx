@@ -26,6 +26,7 @@ import * as XLSX from "xlsx";
 import { clearInactivePdfCache, PdfSchematicViewer, type PdfScrollSync, type PdfViewerSide } from "./pdf-schematic-viewer";
 import {
   canonicalPartNumber,
+  bomStructureLabel,
   compareBom,
   analyzeCompanyBomMatrix,
   companyColumnLabels,
@@ -123,6 +124,13 @@ function primaryTypeTone(type: DiffPrimaryType) {
   return "changed";
 }
 
+function diffStructureLabel(item: BomDiff) {
+  const before = bomStructureLabel(item.before);
+  const after = bomStructureLabel(item.after);
+  if (before && after && before !== after) return `${before} → ${after}`;
+  return after || before;
+}
+
 export default function Home() {
   const [tab, setTab] = useState<"bom" | "schematic">("bom");
   const [before, setBefore] = useState(demoBefore);
@@ -164,7 +172,7 @@ export default function Home() {
   );
   const matchingDiffs = changedDiffs.filter((item) => {
     const manufacturerNames = [...(item.before?.alternatives ?? []), ...(item.after?.alternatives ?? [])].map((part) => part.manufacturerName ?? "").join(" ");
-    const text = `${item.ref} ${displayPart(item.before)} ${displayPart(item.after)} ${item.before?.manufacturerPart ?? ""} ${item.after?.manufacturerPart ?? ""} ${manufacturerNames} ${item.fields.join(" ")} ${item.addedPositions.join(" ")} ${item.removedPositions.join(" ")}`.toLowerCase();
+    const text = `${item.ref} ${diffStructureLabel(item)} ${displayPart(item.before)} ${displayPart(item.after)} ${item.before?.manufacturerPart ?? ""} ${item.after?.manufacturerPart ?? ""} ${manufacturerNames} ${item.fields.join(" ")} ${item.addedPositions.join(" ")} ${item.removedPositions.join(" ")}`.toLowerCase();
     const matchesFilter = filter === "all" || item.primaryType === filter;
     const matchesImpact = impactFilter === "all"
       || (impactFilter === "purchase" && item.newParts.length > 0)
@@ -344,7 +352,7 @@ export default function Home() {
             {[{ label: "前版", audit: beforeAudit }, { label: "後版", audit: afterAudit }].map(({ label, audit }) => audit && <div key={label}><ShieldCheck size={16} /><span><strong>{label}匯入完成</strong><small>{audit.sheetName}・{audit.audit.groupCount} 組料・{audit.audit.positionCount} 個位置・{audit.audit.issues.filter((issue) => issue.severity === "warning").length} 項警告</small></span></div>)}
           </section>}
           <section className="format-strip" aria-label="BOM 欄位規則">
-            <span><b>項次</b> 只用於分組，不跨版比對</span><span><b>料號</b> 取最右 12 碼</span><span><b>數量</b> 一般數量</span><span><b>插件位置</b> 優先計數</span><span><b>製造商名稱</b> 僅顯示</span><span><b>製造商料號</b> 僅顯示</span><span className="ignored"><b>客戶料號</b> 暫不比對</span><strong>依標題名稱自動定位欄位</strong>
+            <span><b>項次</b> 只切分同架構主替料，不跨版比對</span><span><b>架構</b> 69 → VB-T／VB-D／08 PCB</span><span><b>料號</b> 取最右 12 碼</span><span><b>數量</b> 一般數量</span><span><b>插件位置</b> 優先計數</span><span><b>製造商名稱</b> 僅顯示</span><span><b>製造商料號</b> 僅顯示</span><span className="ignored"><b>客戶料號</b> 暫不比對</span><strong>依標題名稱自動定位欄位</strong>
           </section>
 
           <section className="summary-grid">
@@ -368,7 +376,7 @@ export default function Home() {
               <div className="table-wrap">
                 <table>
                   <thead><tr><th>主要異動</th><th>影響標籤</th><th>料號新增／刪除</th><th>插件位置差異</th><th>舊版料號／製造商資訊</th><th></th><th>新版料號／製造商資訊</th><th>數量</th></tr></thead>
-                  <tbody>{visible.map((item) => <tr key={item.ref}>
+                  <tbody>{visible.map((item, index) => <tr key={item.after?.structureKey ?? item.before?.structureKey ?? `${item.ref}-${index}`}>
                     <td><PrimaryTypeBadge item={item} /></td>
                     <td><ChangeFields fields={item.fields} /></td>
                     <td><BPartDifference item={item} /></td>
@@ -433,7 +441,8 @@ function SessionDialog({ records, onClose }: { records: ImportRecord[]; onClose:
 
 function PrimaryTypeBadge({ item }: { item: BomDiff }) {
   const label = item.matchConfidence === "high" ? "高可信" : item.matchConfidence === "medium" ? "中可信" : "低可信";
-  return <div className="primary-stack"><span className={`primary-badge ${primaryTypeTone(item.primaryType)}`}>{primaryTypeLabel(item.primaryType)}</span><small className={`confidence ${item.matchConfidence}`}>{item.needsReview ? "待確認 · " : ""}{label}</small><small className="match-reason">{item.matchReason}</small></div>;
+  const structure = diffStructureLabel(item);
+  return <div className="primary-stack"><span className={`primary-badge ${primaryTypeTone(item.primaryType)}`}>{primaryTypeLabel(item.primaryType)}</span>{structure && <small className="structure-context">所屬架構<br />{structure}</small>}<small className={`confidence ${item.matchConfidence}`}>{item.needsReview ? "待確認 · " : ""}{label}</small><small className="match-reason">{item.matchReason}</small></div>;
 }
 
 function ChangeFields({ fields }: { fields: string[] }) {

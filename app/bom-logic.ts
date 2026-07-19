@@ -6,6 +6,8 @@ export type BomAlternative = {
   spec: string;
 };
 
+export type BomStructureKind = "root69" | "vb-t" | "vb-d" | "pcb" | "flat";
+
 export type BomItem = {
   ref: string;
   part: string;
@@ -18,6 +20,10 @@ export type BomItem = {
   alternatives: BomAlternative[];
   sourceRows?: number[];
   sourceSheet?: string;
+  declaredQty?: number;
+  structureKind?: BomStructureKind;
+  structurePath?: string[];
+  structureKey?: string;
 };
 
 export type DiffKind = "added" | "removed" | "changed" | "same";
@@ -120,6 +126,23 @@ export function canonicalPartNumber(value: unknown) {
   return compact.length > 12 ? compact.slice(-12) : compact;
 }
 
+export function bomStructureLabel(item?: BomItem) {
+  return item?.structurePath?.filter(Boolean).join(" › ") ?? "";
+}
+
+function structureMarker(rawPart: string): Exclude<BomStructureKind, "flat"> | null {
+  const compact = rawPart.toUpperCase().replace(/\s+/g, "");
+  if (/^69-?[A-Z0-9]+$/.test(compact)) return "root69";
+  if (/^VB-?[A-Z0-9]+T$/.test(compact)) return "vb-t";
+  if (/^VB-?[A-Z0-9]+D$/.test(compact)) return "vb-d";
+  if (canonicalPartNumber(compact).toUpperCase().startsWith("08")) return "pcb";
+  return null;
+}
+
+function structurePartLabel(rawPart: string) {
+  return rawPart.toUpperCase().replace(/\s+/g, "");
+}
+
 function pick(row: Record<string, unknown>, names: string[]) {
   const entry = Object.entries(row).find(([key]) => names.includes(normalizeKey(key)));
   return text(entry?.[1]);
@@ -190,18 +213,24 @@ export function parseCompanyBomMatrix(matrix: unknown[][], headerIndex = findCom
     positions: Set<string>;
     rawQuantity: number;
     sourceRows: number[];
+    structureKind: BomStructureKind;
+    structurePath: string[];
+    structureKey: string;
   };
 
-  const groups = new Map<string, GroupDraft>();
-  let currentRef = "";
+  const groups: GroupDraft[] = [];
+  let currentGroup: GroupDraft | null = null;
+  let rootLabel = "";
+  let branchLabel = "";
+  let branchKind: BomStructureKind = "flat";
+  let rootSection = 0;
+  let groupSequence = 0;
 
   for (const [offset, row] of matrix.slice(headerIndex + 1).entries()) {
     const sourceRow = headerIndex + offset + 2;
     const nextRef = text(cell(row, columns.ref));
-    if (nextRef) currentRef = nextRef;
-    if (!currentRef) continue;
-
-    const part = canonicalPartNumber(cell(row, columns.part));
+    const rawPart = text(cell(row, columns.part));
+    const part = canonicalPartNumber(rawPart);
     const description = text(cell(row, columns.description));
     const spec = text(cell(row, columns.spec));
     const rawQuantity = parseQuantity(cell(row, columns.qty));
@@ -211,29 +240,53 @@ export function parseCompanyBomMatrix(matrix: unknown[][], headerIndex = findCom
 
     if (!part && !manufacturerPart && !positions.length && !rawQuantity) continue;
 
-    const key = normalizeValue(currentRef);
-    const group = groups.get(key) ?? {
-      ref: currentRef,
-      alternatives: [],
-      positions: new Set<string>(),
-      rawQuantity: 0,
-      sourceRows: [],
-    };
+    if (nextRef) {
+      const marker = structureMarker(rawPart);
+      const markerLabel = structurePartLabel(rawPart);
+      if (marker === "root69") {
+        rootSection += 1;
+        rootLabel = markerLabel;
+        branchLabel = "";
+        branchKind = "root69";
+      } else if (marker === "vb-t" || marker === "vb-d" || marker === "pcb") {
+        branchLabel = markerLabel;
+        branchKind = marker;
+      }
+
+      const structureKind = marker ?? branchKind;
+      const structurePath = marker === "root69"
+        ? [rootLabel]
+        : branchLabel
+          ? rootLabel ? [rootLabel, branchLabel] : [branchLabel]
+          : rootLabel ? [rootLabel] : [];
+      groupSequence += 1;
+      currentGroup = {
+        ref: nextRef,
+        alternatives: [],
+        positions: new Set<string>(),
+        rawQuantity: 0,
+        sourceRows: [],
+        structureKind,
+        structurePath,
+        structureKey: `${rootSection || 0}:${structureKind}:${groupSequence}`,
+      };
+      groups.push(currentGroup);
+    }
+    if (!currentGroup) continue;
 
     if (part || manufacturerPart) {
       const alternative = { part, manufacturerPart, manufacturerName, description, spec };
       const alternativeKey = altKey(alternative);
-      if (!group.alternatives.some((candidate) => altKey(candidate) === alternativeKey)) {
-        group.alternatives.push(alternative);
+      if (!currentGroup.alternatives.some((candidate) => altKey(candidate) === alternativeKey)) {
+        currentGroup.alternatives.push(alternative);
       }
     }
-    positions.forEach((position) => group.positions.add(position));
-    group.rawQuantity = Math.max(group.rawQuantity, rawQuantity);
-    group.sourceRows.push(sourceRow);
-    groups.set(key, group);
+    positions.forEach((position) => currentGroup.positions.add(position));
+    currentGroup.rawQuantity = Math.max(currentGroup.rawQuantity, rawQuantity);
+    currentGroup.sourceRows.push(sourceRow);
   }
 
-  return [...groups.values()].map((group) => {
+  return groups.map((group) => {
     const positions = [...group.positions].sort(naturalSort);
     const first = group.alternatives[0] ?? { part: "", manufacturerPart: "", manufacturerName: "", description: "", spec: "" };
     return {
@@ -247,6 +300,10 @@ export function parseCompanyBomMatrix(matrix: unknown[][], headerIndex = findCom
       positions,
       alternatives: group.alternatives,
       sourceRows: group.sourceRows,
+      declaredQty: group.rawQuantity,
+      structureKind: group.structureKind,
+      structurePath: group.structurePath,
+      structureKey: group.structureKey,
     };
   });
 }
@@ -265,45 +322,40 @@ export function analyzeCompanyBomMatrix(matrix: unknown[][], headerIndex: number
 
   const duplicatePositions = new Map<string, Array<{ ref: string; rows: number[] }>>();
   items.forEach((item) => item.positions.forEach((position) => {
-    const uses = duplicatePositions.get(position) ?? [];
+    const scopedPosition = `${item.structureKey?.split(":").slice(0, 2).join(":") ?? "flat"}\u0000${position}`;
+    const uses = duplicatePositions.get(scopedPosition) ?? [];
     uses.push({ ref: item.ref, rows: item.sourceRows ?? [] });
-    duplicatePositions.set(position, uses);
+    duplicatePositions.set(scopedPosition, uses);
   }));
-  duplicatePositions.forEach((uses, position) => {
+  duplicatePositions.forEach((uses, scopedPosition) => {
+    const position = scopedPosition.split("\u0000").at(-1) ?? scopedPosition;
     if (uses.length > 1) issues.push({ severity: "warning", code: "duplicate-position", message: `${position} 同時出現在 ${uses.map((use) => use.ref).join("、")}，請確認是否重複分配。`, rows: uses.flatMap((use) => use.rows) });
   });
 
   if (isCompleteCompanyMapping(mapping)) {
     const rawParts = new Map<string, Set<string>>();
-    const quantityByRef = new Map<string, { qty: number; rows: number[] }>();
-    let currentRef = "";
+    const rowScopes = new Map<number, string>();
+    items.forEach((item) => item.sourceRows?.forEach((row) => rowScopes.set(row, item.structureKey?.split(":").slice(0, 2).join(":") ?? "flat")));
     matrix.slice(headerIndex + 1).forEach((row, offset) => {
       const rowNumber = headerIndex + offset + 2;
-      const nextRef = text(row[mapping.ref]);
-      if (nextRef) currentRef = nextRef;
       const rawPart = text(row[mapping.part]).replace(/\s+/g, "");
       const canonical = canonicalPartNumber(rawPart);
       if (canonical && rawPart) {
-        const variants = rawParts.get(normalizeValue(canonical)) ?? new Set<string>();
+        const collisionKey = `${rowScopes.get(rowNumber) ?? "flat"}\u0000${normalizeValue(canonical)}`;
+        const variants = rawParts.get(collisionKey) ?? new Set<string>();
         variants.add(normalizeValue(rawPart));
-        rawParts.set(normalizeValue(canonical), variants);
-      }
-      if (currentRef) {
-        const qty = parseQuantity(row[mapping.qty]);
-        const previous = quantityByRef.get(normalizeValue(currentRef)) ?? { qty: 0, rows: [] };
-        previous.qty = Math.max(previous.qty, qty);
-        previous.rows.push(rowNumber);
-        quantityByRef.set(normalizeValue(currentRef), previous);
+        rawParts.set(collisionKey, variants);
       }
     });
-    rawParts.forEach((variants, canonical) => {
+    rawParts.forEach((variants, collisionKey) => {
+      const canonical = collisionKey.split("\u0000").at(-1) ?? collisionKey;
       if (variants.size > 1) issues.push({ severity: "warning", code: "part-collision", message: `多個原始料號取最右 12 碼後都變成 ${canonical}：${[...variants].join("、")}` });
     });
     items.forEach((item) => {
       if (!item.alternatives.some((part) => part.part)) issues.push({ severity: "warning", code: "missing-part", message: `項次 ${item.ref} 沒有料號。`, rows: item.sourceRows });
-      const source = quantityByRef.get(normalizeValue(item.ref));
-      if (item.positions.length && source?.qty && item.positions.length !== source.qty) {
-        issues.push({ severity: "warning", code: "quantity-mismatch", message: `項次 ${item.ref} 的數量為 ${source.qty}，但插件位置共有 ${item.positions.length} 個。`, rows: source.rows });
+      if (item.positions.length && item.declaredQty && item.positions.length !== item.declaredQty) {
+        const structure = bomStructureLabel(item);
+        issues.push({ severity: "warning", code: "quantity-mismatch", message: `${structure ? `${structure}／` : ""}項次 ${item.ref} 的數量為 ${item.declaredQty}，但插件位置共有 ${item.positions.length} 個。`, rows: item.sourceRows });
       }
     });
   }
@@ -316,7 +368,7 @@ export function analyzeCompanyBomMatrix(matrix: unknown[][], headerIndex: number
       mappingLabels,
       sourceRows: Math.max(0, matrix.length - headerIndex - 1),
       groupCount: items.length,
-      positionCount: new Set(items.flatMap((item) => item.positions)).size,
+      positionCount: new Set(items.flatMap((item) => item.positions.map((position) => `${item.structureKey?.split(":").slice(0, 2).join(":") ?? "flat"}\u0000${position}`))).size,
       issues,
     },
   };
@@ -353,6 +405,7 @@ export function compareBom(before: BomItem[], after: BomItem[]): BomDiff[] {
   const afterPartKeys = new Set(after.flatMap((item) => item.alternatives.map(partKey)).filter(Boolean));
   const candidates: Array<{ beforeIndex: number; afterIndex: number; score: number }> = [];
   before.forEach((left, beforeIndex) => after.forEach((right, afterIndex) => {
+    if (!structureCompatible(left, right)) return;
     const score = groupMatchScore(left, right);
     if (score > 0) candidates.push({ beforeIndex, afterIndex, score });
   }));
@@ -455,12 +508,22 @@ function matchMetadata(before: BomItem | undefined, after: BomItem | undefined, 
   const overlappingPositions = overlapStats(before.positions, after.positions, normalizeValue).intersection > 0;
   const sameParts = overlapStats(before.alternatives.map(partKey), after.alternatives.map(partKey), normalizeValue).intersection > 0;
   const confidence = ambiguous || score < 250 ? "low" : score < 700 ? "medium" : "high";
-  const reasons = [samePositions ? "插件位置完全相同" : overlappingPositions ? "部分插件位置相同" : "", sameParts ? "料號重疊" : ""].filter(Boolean);
+  const sameStructure = structureCompatible(before, after) && (before.structureKind ?? "flat") !== "flat";
+  const reasons = [sameStructure ? "所屬架構相同" : "", samePositions ? "插件位置完全相同" : overlappingPositions ? "部分插件位置相同" : "", sameParts ? "料號重疊" : ""].filter(Boolean);
   return {
     matchConfidence: confidence,
     matchReason: reasons.join("、") || "依群組相似度配對",
     needsReview: ambiguous || confidence === "low",
   };
+}
+
+function structureCompatible(before: BomItem, after: BomItem) {
+  const beforeKind = before.structureKind ?? "flat";
+  const afterKind = after.structureKind ?? "flat";
+  if (beforeKind !== afterKind) return false;
+  const beforeSection = before.structureKey?.split(":")[0];
+  const afterSection = after.structureKey?.split(":")[0];
+  return !beforeSection || !afterSection || beforeSection === afterSection;
 }
 
 const primaryTypeSortOrder: Record<DiffPrimaryType, number> = {

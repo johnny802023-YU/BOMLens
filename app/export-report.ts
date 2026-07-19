@@ -1,5 +1,5 @@
 import ExcelJS from "exceljs";
-import { companyColumnLabels, type BomAlternative, type BomDiff, type CompanyColumnKey, type DiffPrimaryType, type ImportAudit } from "./bom-logic.ts";
+import { bomStructureLabel, companyColumnLabels, type BomAlternative, type BomDiff, type CompanyColumnKey, type DiffPrimaryType, type ImportAudit } from "./bom-logic.ts";
 
 export type ReportSource = { fileName: string; sheetName: string; importedAt: string; audit: ImportAudit };
 export type ReportContext = { before?: ReportSource | null; after?: ReportSource | null };
@@ -44,6 +44,18 @@ function listMpn(parts: BomAlternative[]) {
 
 function listManufacturerNames(parts: BomAlternative[]) {
   return parts.map((part) => part.manufacturerName).filter(Boolean).join("\n");
+}
+
+function diffStructureLabel(diff: BomDiff) {
+  const before = bomStructureLabel(diff.before);
+  const after = bomStructureLabel(diff.after);
+  if (before && after && before !== after) return `${before} → ${after}`;
+  return after || before;
+}
+
+function primaryWithStructure(diff: BomDiff) {
+  const structure = diffStructureLabel(diff);
+  return `${primaryLabels[diff.primaryType]}${structure ? `\n所屬架構：${structure}` : ""}`;
 }
 
 function fill(color: string): ExcelJS.Fill {
@@ -161,7 +173,7 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
     row.eachCell({ includeEmpty: true }, (cell) => { cell.border = border(); });
   });
   summary.mergeCells("A22:F24");
-  summary.getCell("A22").value = "判斷說明：料號取最右 12 碼；項次只用於主替料分組且不跨版比較；數量優先採用插件位置數，插件位置空白時才採用數量欄；製造商名稱與製造商料號只供顯示，客戶料號暫不使用。匯入時依標題名稱自動定位欄位。";
+  summary.getCell("A22").value = "判斷說明：料號取最右 12 碼；依 69 → VB-T／VB-D／08 PCB 的順序架構分組；項次只切分同一架構內的主替料且不跨版比較；數量優先採用插件位置數，插件位置空白時才採用數量欄；製造商名稱與製造商料號只供顯示，客戶料號暫不使用。";
   summary.getCell("A22").alignment = { vertical: "top", wrapText: true };
   summary.getCell("A22").font = { name: "Microsoft JhengHei", size: 10, color: { argb: colors.gray } };
   summary.getCell("A22").fill = fill(colors.paleGray);
@@ -188,7 +200,7 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
   diffs.forEach((diff, index) => {
     const row = details.getRow(5 + index);
     row.values = [
-      primaryLabels[diff.primaryType], diff.fields.join("、"), listParts(diff.newParts), listParts(diff.deletedParts),
+      primaryWithStructure(diff), diff.fields.join("、"), listParts(diff.newParts), listParts(diff.deletedParts),
       diff.before ? listParts(diff.before.alternatives) : "", diff.after ? listParts(diff.after.alternatives) : "",
       diff.before ? listMpn(diff.before.alternatives) : "", diff.after ? listMpn(diff.after.alternatives) : "",
       diff.before ? listManufacturerNames(diff.before.alternatives) : "", diff.after ? listManufacturerNames(diff.after.alternatives) : "",
@@ -197,7 +209,7 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
       diff.matchConfidence === "high" ? "高" : diff.matchConfidence === "medium" ? "中" : "低", diff.matchReason, diff.needsReview ? "是" : "否",
       diff.before?.sourceRows?.join(", ") ?? "", diff.after?.sourceRows?.join(", ") ?? "",
     ];
-    row.height = 40;
+    row.height = diffStructureLabel(diff) ? 54 : 40;
     row.eachCell({ includeEmpty: true }, (cell, column) => {
       cell.font = { name: "Microsoft JhengHei", size: 9, color: { argb: "344054" } };
       cell.alignment = { vertical: "middle", wrapText: true };
@@ -226,12 +238,13 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
   styleHeader(lifecycleHeader);
   const lifecycleRows: Array<[string, BomAlternative, string, number, string, string]> = [];
   diffs.forEach((diff) => {
-    diff.newParts.forEach((part) => lifecycleRows.push(["新版完全新料", part, diff.after?.positions.join(", ") ?? "", diff.after?.qty ?? 0, primaryLabels[diff.primaryType], diff.after?.ref ?? ""]));
-    diff.deletedParts.forEach((part) => lifecycleRows.push(["新版完全移除", part, diff.before?.positions.join(", ") ?? "", diff.before?.qty ?? 0, primaryLabels[diff.primaryType], diff.before?.ref ?? ""]));
+    diff.newParts.forEach((part) => lifecycleRows.push(["新版完全新料", part, diff.after?.positions.join(", ") ?? "", diff.after?.qty ?? 0, primaryWithStructure(diff), diff.after?.ref ?? ""]));
+    diff.deletedParts.forEach((part) => lifecycleRows.push(["新版完全移除", part, diff.before?.positions.join(", ") ?? "", diff.before?.qty ?? 0, primaryWithStructure(diff), diff.before?.ref ?? ""]));
   });
   lifecycleRows.forEach(([status, part, positions, qty, primary, ref], index) => {
     const row = lifecycle.getRow(5 + index);
     row.values = [status, partLabel(part), part.manufacturerPart, part.manufacturerName ?? "", positions, qty, primary, ref];
+    row.height = primary.includes("所屬架構：") ? 42 : 25;
     row.eachCell({ includeEmpty: true }, (cell) => {
       cell.font = { name: "Microsoft JhengHei", size: 9, color: { argb: "344054" } };
       cell.alignment = { vertical: "middle", wrapText: true };
@@ -257,7 +270,8 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
   styleHeader(reviewHeader);
   diffs.filter((diff) => diff.needsReview).forEach((diff, index) => {
     const row = review.getRow(5 + index);
-    row.values = [primaryLabels[diff.primaryType], diff.before ? listParts(diff.before.alternatives) : "", diff.after ? listParts(diff.after.alternatives) : "", diff.after?.positions.join(", ") || diff.before?.positions.join(", ") || "", diff.matchConfidence, diff.matchReason, diff.before?.sourceRows?.join(", ") ?? "", diff.after?.sourceRows?.join(", ") ?? ""];
+    row.values = [primaryWithStructure(diff), diff.before ? listParts(diff.before.alternatives) : "", diff.after ? listParts(diff.after.alternatives) : "", diff.after?.positions.join(", ") || diff.before?.positions.join(", ") || "", diff.matchConfidence, diff.matchReason, diff.before?.sourceRows?.join(", ") ?? "", diff.after?.sourceRows?.join(", ") ?? ""];
+    row.height = diffStructureLabel(diff) ? 48 : 25;
     row.eachCell({ includeEmpty: true }, (cell) => { cell.font = { name: "Microsoft JhengHei", size: 9, color: { argb: "344054" } }; cell.alignment = { vertical: "middle", wrapText: true }; cell.border = border(); });
   });
   review.columns = [15, 24, 24, 24, 12, 28, 18, 18].map((width) => ({ width }));

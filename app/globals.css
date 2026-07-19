@@ -168,6 +168,7 @@ tr:hover td { background: #fbfcff; }
 .primary-badge.changed { color: #2c63bd; background: #edf3ff; }
 .primary-badge.replacement { color: #9a651b; background: #fff3dc; }
 .primary-stack { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.structure-context { max-width: 105px; color: #526176; font-size: 8px; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; }
 .confidence { font-size: 8px; font-weight: 800; }
 .confidence.high { color: #16835d; }.confidence.medium { color: #9a651b; }.confidence.low { color: #b14949; }
 .match-reason { max-width: 105px; color: #838d9d; font-size: 8px; line-height: 1.4; }

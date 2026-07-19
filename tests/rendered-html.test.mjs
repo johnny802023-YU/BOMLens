@@ -83,6 +83,9 @@ test("builds a formatted five-sheet Excel report with audit and review tabs", as
     qty: 1,
     positions: [position],
     alternatives: [{ part, manufacturerPart: `${part}-MPN`, manufacturerName: `${part}-MAKER`, description: "", spec: "" }],
+    structureKind: "vb-t",
+    structurePath: ["69-ROOT", "VB-BOARD-T"],
+    structureKey: "1:vb-t:1",
   });
   const diffs = compareBom([item("OLD-PART", "U20")], [item("NEW-PART", "U20")]);
   const { buildBomReport } = await import("../app/export-report.ts");
@@ -99,6 +102,7 @@ test("builds a formatted five-sheet Excel report with audit and review tabs", as
   assert.deepEqual(parsed.SheetNames, ["差異摘要", "差異明細", "料號生命週期", "待人工確認", "匯入稽核"]);
   assert.equal(parsed.Sheets["差異摘要"].A1.v, "BOM 版本差異報告");
   assert.equal(parsed.Sheets["差異明細"].A4.v, "主要異動");
+  assert.match(parsed.Sheets["差異明細"].A5.v, /所屬架構：69-ROOT › VB-BOARD-T/);
   assert.equal(parsed.Sheets["差異明細"].I4.v, "前版製造商名稱");
   assert.equal(parsed.Sheets["料號生命週期"].A4.v, "生命週期");
   assert.equal(parsed.Sheets["料號生命週期"].D4.v, "製造商名稱");
@@ -117,6 +121,9 @@ test("builds a standalone offline HTML report", async () => {
     qty: 1,
     positions: [position],
     alternatives: [{ part, manufacturerPart: `${part}-MPN`, manufacturerName: `${part}-MAKER`, description: "", spec: "" }],
+    structureKind: "vb-t",
+    structurePath: ["69-ROOT", "VB-BOARD-T"],
+    structureKey: "1:vb-t:1",
   });
   const diffs = compareBom([item("OLD<&", "U20")], [item("NEW", "U20")]);
   const { buildBomHtmlReport } = await import("../app/export-html-report.ts");
@@ -129,6 +136,8 @@ test("builds a standalone offline HTML report", async () => {
   assert.match(html, /待人工確認/);
   assert.match(html, /匯入稽核/);
   assert.match(html, /製造商名稱/);
+  assert.match(html, /所屬架構/);
+  assert.match(html, /69-ROOT › VB-BOARD-T/);
   assert.match(html, /Content-Security-Policy/);
   assert.match(html, /OLD&lt;&amp;/);
   assert.doesNotMatch(html, /https?:\/\//);
@@ -226,6 +235,71 @@ test("keeps parsing after columns are inserted, removed, or reordered", () => {
   assert.deepEqual(parsed[0].alternatives.map((part) => part.part), ["123456789012", "INTERNAL-ALT"]);
   assert.deepEqual(parsed[0].alternatives.map((part) => part.manufacturerPart), ["MPN-MAIN", "MPN-ALT"]);
   assert.deepEqual(parsed[0].alternatives.map((part) => part.manufacturerName), ["Texas Instruments", "Nexperia"]);
+});
+
+test("keeps repeated item numbers separate across VB-T, VB-D, and PCB branches", () => {
+  const header = ["項次", "料號", "數量", "插件位置", "製造商料號"];
+  const matrix = [
+    header,
+    ["000", "69 - ROOT000001", "1", "", "ROOT-MPN"],
+    ["001", "VB - BOARD00001T", "1", "", "VB-T-MPN"],
+    ["00U", "T-MAIN-000001", "1", "U1", "T-MAIN-MPN"],
+    ["", "T-ALT-0000001", "1", "", "T-ALT-MPN"],
+    ["002", "VBBOARD00002D", "1", "", "VB-D-MPN"],
+    ["00U", "D-MAIN-000001", "1", "U1", "D-MAIN-MPN"],
+    ["", "D-ALT-0000001", "1", "", "D-ALT-MPN"],
+    ["003", "PREFIX-081234567890", "1", "", "PCB-MPN"],
+    ["00U", "P-MAIN-000001", "1", "U1", "P-MAIN-MPN"],
+    ["", "P-ALT-0000001", "1", "", "P-ALT-MPN"],
+  ];
+
+  const parsed = parseCompanyBomMatrix(matrix);
+  const repeated = parsed.filter((item) => item.ref === "00U");
+  assert.equal(parsed.length, 7);
+  assert.equal(repeated.length, 3);
+  assert.deepEqual(repeated.map((item) => item.structureKind), ["vb-t", "vb-d", "pcb"]);
+  assert.deepEqual(repeated.map((item) => item.alternatives.length), [2, 2, 2]);
+  assert.match(repeated[0].structurePath.join(" > "), /69-ROOT000001 > VB-BOARD00001T/);
+  assert.equal(parsed.find((item) => item.structureKind === "root69")?.part, canonicalPartNumber("69 - ROOT000001"));
+  assert.equal(parsed.find((item) => item.structureKind === "pcb")?.part, "081234567890");
+
+  const audit = analyzeCompanyBomMatrix(matrix, 0).audit;
+  assert.equal(audit.positionCount, 3);
+  assert.ok(!audit.issues.some((issue) => issue.code === "duplicate-position"));
+  assert.ok(!audit.issues.some((issue) => issue.code === "part-collision"));
+});
+
+test("still warns when a placement repeats inside the same structure branch", () => {
+  const matrix = [
+    ["項次", "料號", "數量", "插件位置"],
+    ["000", "69-ROOT000001", "1", ""],
+    ["001", "VB-BOARD00001T", "1", ""],
+    ["00U", "T-MAIN-000001", "1", "U1"],
+    ["00V", "T-MAIN-000002", "1", "U1"],
+  ];
+  const result = analyzeCompanyBomMatrix(matrix, 0);
+  assert.ok(result.audit.issues.some((issue) => issue.code === "duplicate-position"));
+});
+
+test("compares parent structure rows while pairing children only within the same branch", () => {
+  const header = ["項次", "料號", "數量", "插件位置"];
+  const bom = (rootPart, tPart, dPart) => parseCompanyBomMatrix([
+    header,
+    ["000", rootPart, "1", ""],
+    ["001", "VB-BOARD00001T", "1", ""],
+    ["00U", tPart, "1", "U1"],
+    ["002", "VB-BOARD00002D", "1", ""],
+    ["00U", dPart, "1", "U1"],
+  ]);
+  const before = bom("69-ROOTOLD00001", "PART-T-SAME", "PART-D-OLD");
+  const after = bom("69-ROOTNEW00001", "PART-T-SAME", "PART-D-NEW");
+  const diffs = compareBom(before, after);
+
+  const sameT = diffs.find((diff) => diff.before?.structureKind === "vb-t" && diff.before?.ref === "00U");
+  assert.equal(sameT?.kind, "same");
+  assert.ok(!diffs.some((diff) => diff.before?.structureKind === "vb-t" && diff.after?.structureKind === "vb-d"));
+  assert.ok(diffs.some((diff) => diff.primaryType === "componentRemoved" && diff.before?.structureKind === "root69"));
+  assert.ok(diffs.some((diff) => diff.primaryType === "componentAdded" && diff.after?.structureKind === "root69"));
 });
 
 test("allows optional manufacturer columns to be absent", () => {
