@@ -6,7 +6,7 @@ export type BomAlternative = {
   spec: string;
 };
 
-export type BomStructureKind = "root69" | "vb-t" | "vb-d" | "pcb" | "flat";
+export type BomStructureKind = "root69" | "vb-t" | "vb-d" | "board60" | "pcb" | "flat";
 
 export type BomItem = {
   ref: string;
@@ -131,16 +131,17 @@ export function bomStructureLabel(item?: BomItem) {
 }
 
 function structureMarker(rawPart: string): Exclude<BomStructureKind, "flat"> | null {
-  const compact = rawPart.toUpperCase().replace(/\s+/g, "");
+  const compact = structurePartLabel(rawPart);
   if (/^69-?[A-Z0-9]+$/.test(compact)) return "root69";
   if (/^VB-?[A-Z0-9]+T$/.test(compact)) return "vb-t";
   if (/^VB-?[A-Z0-9]+D$/.test(compact)) return "vb-d";
+  if (/^60-?[A-Z0-9]+$/.test(compact)) return "board60";
   if (canonicalPartNumber(compact).toUpperCase().startsWith("08")) return "pcb";
   return null;
 }
 
 function structurePartLabel(rawPart: string) {
-  return rawPart.toUpperCase().replace(/\s+/g, "");
+  return rawPart.toUpperCase().replace(/\s+/g, "").replace(/^[|│├└─-]+/, "");
 }
 
 function pick(row: Record<string, unknown>, names: string[]) {
@@ -240,15 +241,16 @@ export function parseCompanyBomMatrix(matrix: unknown[][], headerIndex = findCom
 
     if (!part && !manufacturerPart && !positions.length && !rawQuantity) continue;
 
-    if (nextRef) {
-      const marker = structureMarker(rawPart);
+    const detectedMarker = structureMarker(rawPart);
+    const marker = detectedMarker === "root69" || nextRef ? detectedMarker : null;
+    if (nextRef || marker === "root69") {
       const markerLabel = structurePartLabel(rawPart);
       if (marker === "root69") {
         rootSection += 1;
         rootLabel = markerLabel;
         branchLabel = "";
         branchKind = "root69";
-      } else if (marker === "vb-t" || marker === "vb-d" || marker === "pcb") {
+      } else if (marker === "vb-t" || marker === "vb-d" || marker === "board60" || marker === "pcb") {
         branchLabel = markerLabel;
         branchKind = marker;
       }
@@ -261,7 +263,7 @@ export function parseCompanyBomMatrix(matrix: unknown[][], headerIndex = findCom
           : rootLabel ? [rootLabel] : [];
       groupSequence += 1;
       currentGroup = {
-        ref: nextRef,
+        ref: nextRef || `69-架構-${rootSection}`,
         alternatives: [],
         positions: new Set<string>(),
         rawQuantity: 0,

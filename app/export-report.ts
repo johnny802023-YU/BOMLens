@@ -173,7 +173,7 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
     row.eachCell({ includeEmpty: true }, (cell) => { cell.border = border(); });
   });
   summary.mergeCells("A22:F24");
-  summary.getCell("A22").value = "判斷說明：料號取最右 12 碼；依 69 → VB-T／VB-D／08 PCB 的順序架構分組；項次只切分同一架構內的主替料且不跨版比較；數量優先採用插件位置數，插件位置空白時才採用數量欄；製造商名稱與製造商料號只供顯示，客戶料號暫不使用。";
+  summary.getCell("A22").value = "判斷說明：料號取最右 12 碼；依 69 → VB-D／60／VB-T／08 PCB 的順序架構分組；項次只切分同一架構內的主替料且不跨版比較；數量優先採用插件位置數，插件位置空白時才採用數量欄；製造商名稱與製造商料號只供顯示，客戶料號暫不使用。";
   summary.getCell("A22").alignment = { vertical: "top", wrapText: true };
   summary.getCell("A22").font = { name: "Microsoft JhengHei", size: 10, color: { argb: colors.gray } };
   summary.getCell("A22").fill = fill(colors.paleGray);

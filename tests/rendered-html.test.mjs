@@ -237,34 +237,38 @@ test("keeps parsing after columns are inserted, removed, or reordered", () => {
   assert.deepEqual(parsed[0].alternatives.map((part) => part.manufacturerName), ["Texas Instruments", "Nexperia"]);
 });
 
-test("keeps repeated item numbers separate across VB-T, VB-D, and PCB branches", () => {
+test("keeps repeated item numbers separate across VB-D, 60, VB-T, and PCB branches", () => {
   const header = ["項次", "料號", "數量", "插件位置", "製造商料號"];
   const matrix = [
     header,
-    ["000", "69 - ROOT000001", "1", "", "ROOT-MPN"],
-    ["001", "VB - BOARD00001T", "1", "", "VB-T-MPN"],
-    ["00U", "T-MAIN-000001", "1", "U1", "T-MAIN-MPN"],
-    ["", "T-ALT-0000001", "1", "", "T-ALT-MPN"],
-    ["002", "VBBOARD00002D", "1", "", "VB-D-MPN"],
-    ["00U", "D-MAIN-000001", "1", "U1", "D-MAIN-MPN"],
-    ["", "D-ALT-0000001", "1", "", "D-ALT-MPN"],
-    ["003", "PREFIX-081234567890", "1", "", "PCB-MPN"],
-    ["00U", "P-MAIN-000001", "1", "U1", "P-MAIN-MPN"],
-    ["", "P-ALT-0000001", "1", "", "P-ALT-MPN"],
+    ["", "69 - ROOT000001", "1", "", "ROOT-MPN"],
+    ["001", "|---VBBOARD00002D", "1", "", "VB-D-MPN"],
+    ["00U", "| |---D-MAIN-000001", "1", "U1", "D-MAIN-MPN"],
+    ["", "| | |---D-ALT-0000001", "1", "", "D-ALT-MPN"],
+    ["014", "|---60-BOARD000001", "1", "", "60-MPN"],
+    ["00U", "| |---M-MAIN-000001", "1", "U1", "M-MAIN-MPN"],
+    ["", "| | |---M-ALT-0000001", "1", "", "M-ALT-MPN"],
+    ["002", "|---VB - BOARD00001T", "1", "", "VB-T-MPN"],
+    ["00U", "| |---T-MAIN-000001", "1", "U1", "T-MAIN-MPN"],
+    ["", "| | |---T-ALT-0000001", "1", "", "T-ALT-MPN"],
+    ["00U", "| |---081234567890", "1", "U1", "PCB-MPN"],
+    ["", "| | |---S-08123456789", "1", "", "PCB-ALT-MPN"],
   ];
 
   const parsed = parseCompanyBomMatrix(matrix);
   const repeated = parsed.filter((item) => item.ref === "00U");
-  assert.equal(parsed.length, 7);
-  assert.equal(repeated.length, 3);
-  assert.deepEqual(repeated.map((item) => item.structureKind), ["vb-t", "vb-d", "pcb"]);
-  assert.deepEqual(repeated.map((item) => item.alternatives.length), [2, 2, 2]);
-  assert.match(repeated[0].structurePath.join(" > "), /69-ROOT000001 > VB-BOARD00001T/);
+  assert.equal(parsed.length, 8);
+  assert.equal(repeated.length, 4);
+  assert.deepEqual(repeated.map((item) => item.structureKind), ["vb-d", "board60", "vb-t", "pcb"]);
+  assert.deepEqual(repeated.map((item) => item.alternatives.length), [2, 2, 2, 2]);
+  assert.match(repeated[0].structurePath.join(" > "), /69-ROOT000001 > VBBOARD00002D/);
+  assert.match(repeated[1].structurePath.join(" > "), /69-ROOT000001 > 60-BOARD000001/);
   assert.equal(parsed.find((item) => item.structureKind === "root69")?.part, canonicalPartNumber("69 - ROOT000001"));
+  assert.equal(parsed.find((item) => item.structureKind === "root69")?.ref, "69-架構-1");
   assert.equal(parsed.find((item) => item.structureKind === "pcb")?.part, "081234567890");
 
   const audit = analyzeCompanyBomMatrix(matrix, 0).audit;
-  assert.equal(audit.positionCount, 3);
+  assert.equal(audit.positionCount, 4);
   assert.ok(!audit.issues.some((issue) => issue.code === "duplicate-position"));
   assert.ok(!audit.issues.some((issue) => issue.code === "part-collision"));
 });

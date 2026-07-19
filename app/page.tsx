@@ -352,7 +352,7 @@ export default function Home() {
             {[{ label: "前版", audit: beforeAudit }, { label: "後版", audit: afterAudit }].map(({ label, audit }) => audit && <div key={label}><ShieldCheck size={16} /><span><strong>{label}匯入完成</strong><small>{audit.sheetName}・{audit.audit.groupCount} 組料・{audit.audit.positionCount} 個位置・{audit.audit.issues.filter((issue) => issue.severity === "warning").length} 項警告</small></span></div>)}
           </section>}
           <section className="format-strip" aria-label="BOM 欄位規則">
-            <span><b>項次</b> 只切分同架構主替料，不跨版比對</span><span><b>架構</b> 69 → VB-T／VB-D／08 PCB</span><span><b>料號</b> 取最右 12 碼</span><span><b>數量</b> 一般數量</span><span><b>插件位置</b> 優先計數</span><span><b>製造商名稱</b> 僅顯示</span><span><b>製造商料號</b> 僅顯示</span><span className="ignored"><b>客戶料號</b> 暫不比對</span><strong>依標題名稱自動定位欄位</strong>
+            <span><b>項次</b> 只切分同架構主替料，不跨版比對</span><span><b>架構</b> 69 → VB-D／60／VB-T／08 PCB</span><span><b>料號</b> 取最右 12 碼</span><span><b>數量</b> 一般數量</span><span><b>插件位置</b> 優先計數</span><span><b>製造商名稱</b> 僅顯示</span><span><b>製造商料號</b> 僅顯示</span><span className="ignored"><b>客戶料號</b> 暫不比對</span><strong>依標題名稱自動定位欄位</strong>
           </section>
 
           <section className="summary-grid">
