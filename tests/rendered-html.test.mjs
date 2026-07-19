@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { analyzeCompanyBomMatrix, canonicalPartNumber, compareBom, findCompanyHeader, parseCompanyBomMatrix, parseQuantity, sortBomDiffsForAll } from "../app/bom-logic.ts";
 import { buildPageReferenceIndex, centeredPdfHitScroll, findReferenceHits, lookupReferenceHits, normalizeReference } from "../app/pdf-search.ts";
+import ExcelJS from "exceljs";
 import * as XLSX from "xlsx";
 
 async function render() {
@@ -109,6 +110,47 @@ test("builds a formatted five-sheet Excel report with audit and review tabs", as
   assert.equal(parsed.Sheets["待人工確認"].A1.v, "待人工確認清單");
   assert.equal(parsed.Sheets["匯入稽核"].A1.v, "匯入稽核紀錄");
   assert.ok(buffer.byteLength > 10_000);
+});
+
+test("includes unchanged before and after BOM worksheets in the Excel report", async () => {
+  const sourceWorkbook = new ExcelJS.Workbook();
+  const sourceSheet = sourceWorkbook.addWorksheet("ProductStructure", { views: [{ state: "frozen", ySplit: 1 }] });
+  sourceSheet.getCell("A1").value = "項次";
+  sourceSheet.getCell("A1").font = { name: "Microsoft JhengHei", bold: true, color: { argb: "FFFFFF" } };
+  sourceSheet.getCell("A1").fill = { type: "pattern", pattern: "solid", fgColor: { argb: "1F4E78" } };
+  sourceSheet.getCell("A2").value = "00A";
+  sourceSheet.getCell("B2").value = { formula: "1+1", result: 2 };
+  sourceSheet.mergeCells("C1:D1");
+  sourceSheet.getCell("C1").value = "原始合併標題";
+  sourceSheet.getColumn(2).width = 24;
+  sourceSheet.getRow(2).height = 31;
+  sourceSheet.getCell("A3").value = "隱藏原始列";
+  sourceSheet.getRow(3).hidden = true;
+  sourceSheet.addConditionalFormatting({ ref: "B2", rules: [{ type: "cellIs", operator: "greaterThan", formulae: [1], style: { font: { color: { argb: "FFFF0000" } } } }] });
+  const sourceBuffer = await sourceWorkbook.xlsx.writeBuffer();
+  const originalData = new Uint8Array(sourceBuffer).slice().buffer;
+  const source = { fileName: "source.xlsx", sheetName: "ProductStructure", data: originalData, matrix: [["項次", "數量"], ["00A", 2]] };
+
+  const { buildBomReportWithOriginals } = await import("../app/export-report.ts");
+  const workbook = await buildBomReportWithOriginals([], "before.xlsx", "after.xlsx", { originalBefore: source, originalAfter: source });
+  assert.deepEqual(workbook.worksheets.map((sheet) => sheet.name), ["差異摘要", "差異明細", "料號生命週期", "待人工確認", "匯入稽核", "前版原始 BOM", "後版原始 BOM"]);
+
+  const beforeSheet = workbook.getWorksheet("前版原始 BOM");
+  assert.equal(beforeSheet.getCell("A2").value, "00A");
+  assert.equal(beforeSheet.getCell("B2").formula, "1+1");
+  assert.equal(beforeSheet.getCell("A1").fill.fgColor.argb, "1F4E78");
+  assert.equal(beforeSheet.getColumn(2).width, 24);
+  assert.equal(beforeSheet.getRow(2).height, 31);
+  assert.equal(beforeSheet.getRow(3).hidden, true);
+  assert.equal(beforeSheet.getCell("D1").isMerged, true);
+  assert.equal(beforeSheet.views[0].state, "frozen");
+  assert.equal(beforeSheet.model.conditionalFormattings.length, 1);
+  assert.equal(workbook.getWorksheet("差異摘要").getCell("B4").value.hyperlink, "#'前版原始 BOM'!A1");
+
+  const reportBuffer = await workbook.xlsx.writeBuffer();
+  const parsed = XLSX.read(reportBuffer, { type: "buffer" });
+  assert.equal(parsed.Sheets["前版原始 BOM"].A2.v, "00A");
+  assert.equal(parsed.Sheets["後版原始 BOM"].A2.v, "00A");
 });
 
 test("builds a standalone offline HTML report", async () => {

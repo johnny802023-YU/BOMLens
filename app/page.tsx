@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
+import type { OriginalBomSource } from "./export-report";
 import { clearInactivePdfCache, PdfSchematicViewer, type PdfScrollSync, type PdfViewerSide } from "./pdf-schematic-viewer";
 import {
   canonicalPartNumber,
@@ -51,6 +52,7 @@ type ImportSheet = { name: string; matrix: unknown[][] };
 type PendingImport = {
   side: "before" | "after";
   fileName: string;
+  sourceData: ArrayBuffer;
   sheets: ImportSheet[];
   sheetIndex: number;
   headerIndex: number;
@@ -153,6 +155,8 @@ export default function Home() {
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   const [beforeAudit, setBeforeAudit] = useState<ImportRecord | null>(null);
   const [afterAudit, setAfterAudit] = useState<ImportRecord | null>(null);
+  const [originalBefore, setOriginalBefore] = useState<OriginalBomSource | null>(null);
+  const [originalAfter, setOriginalAfter] = useState<OriginalBomSource | null>(null);
   const [sessionOpen, setSessionOpen] = useState(false);
   const [sessionRecords, setSessionRecords] = useState<ImportRecord[]>([]);
   const [schematicTarget, setSchematicTarget] = useState("");
@@ -184,14 +188,17 @@ export default function Home() {
 
   async function loadBom(file: File, side: "before" | "after") {
     const data = await file.arrayBuffer();
-    const book = XLSX.read(data, { type: "array" });
+    const book = XLSX.read(data, { type: "array", cellStyles: true, cellNF: true, cellDates: true });
+    const sourceData = /\.xls[xm]$/i.test(file.name)
+      ? data
+      : XLSX.write(book, { type: "array", bookType: "xlsx", cellStyles: true });
     const sheets = book.SheetNames.map((name) => ({ name, matrix: XLSX.utils.sheet_to_json<unknown[]>(book.Sheets[name], { header: 1, defval: "", raw: false }) }));
     const candidateIndex = sheets.findIndex((sheet) => findCompanyHeader(sheet.matrix) >= 0);
     const sheetIndex = candidateIndex >= 0 ? candidateIndex : 0;
     const matrix = sheets[sheetIndex]?.matrix ?? [];
     const detectedHeader = findCompanyHeader(matrix);
     const headerIndex = detectedHeader >= 0 ? detectedHeader : Math.max(0, matrix.findIndex((row) => row.filter((cell) => String(cell ?? "").trim()).length >= 2));
-    setPendingImport({ side, fileName: file.name, sheets, sheetIndex, headerIndex, mapping: detectCompanyColumns(matrix[headerIndex] ?? []) });
+    setPendingImport({ side, fileName: file.name, sourceData, sheets, sheetIndex, headerIndex, mapping: detectCompanyColumns(matrix[headerIndex] ?? []) });
   }
 
   function confirmImport() {
@@ -201,17 +208,18 @@ export default function Home() {
     if (!isCompleteCompanyMapping(pendingImport.mapping) || result.audit.issues.some((issue) => issue.severity === "error")) return;
     const items = result.items.map((item) => ({ ...item, sourceSheet: sheet.name }));
     const record = { fileName: pendingImport.fileName, sheetName: sheet.name, importedAt: new Date().toLocaleString("zh-TW", { hour12: false }), audit: result.audit };
+    const original = { fileName: pendingImport.fileName, sheetName: sheet.name, data: pendingImport.sourceData, matrix: sheet.matrix };
     if (pendingImport.side === "before") {
-      setBefore(items); setBeforeName(pendingImport.fileName); setBeforeAudit(record);
+      setBefore(items); setBeforeName(pendingImport.fileName); setBeforeAudit(record); setOriginalBefore(original);
     } else {
-      setAfter(items); setAfterName(pendingImport.fileName); setAfterAudit(record);
+      setAfter(items); setAfterName(pendingImport.fileName); setAfterAudit(record); setOriginalAfter(original);
     }
     setSessionRecords((records) => [record, ...records].slice(0, 20));
     setPendingImport(null);
   }
 
   function resetComparison() {
-    setBefore([]); setAfter([]); setBeforeName(""); setAfterName(""); setBeforeAudit(null); setAfterAudit(null);
+    setBefore([]); setAfter([]); setBeforeName(""); setAfterName(""); setBeforeAudit(null); setAfterAudit(null); setOriginalBefore(null); setOriginalAfter(null);
     setQuery(""); setFilter("all"); setImpactFilter("all"); setTab("bom");
     window.setTimeout(() => beforeInput.current?.click(), 0);
   }
@@ -297,7 +305,7 @@ export default function Home() {
   async function exportCsv() {
     try {
       const { exportBomReport } = await import("./export-report");
-      await exportBomReport(changedDiffs, beforeName, afterName, { before: beforeAudit, after: afterAudit });
+      await exportBomReport(changedDiffs, beforeName, afterName, { before: beforeAudit, after: afterAudit, originalBefore, originalAfter });
     } catch {
       window.alert("報表產生失敗，請重新整理後再試一次。");
     }
@@ -341,9 +349,9 @@ export default function Home() {
           <section className="upload-bar">
             <div className="upload-title"><UploadCloud size={20} /><div><strong>比對來源</strong><small>選擇檔案後立即在本機完成分析</small></div></div>
             <div className="file-pair">
-              <div className="file-chip"><button className="file-select" onClick={() => beforeInput.current?.click()}><span className="file-icon"><FileSpreadsheet size={18} /></span><span><small>前版 BOM</small><strong>{beforeName || "選擇檔案"}</strong></span></button>{beforeName && <button className="chip-x" aria-label="移除前版 BOM" onClick={() => { setBefore([]); setBeforeName(""); setBeforeAudit(null); }}><X size={15} /></button>}</div>
+              <div className="file-chip"><button className="file-select" onClick={() => beforeInput.current?.click()}><span className="file-icon"><FileSpreadsheet size={18} /></span><span><small>前版 BOM</small><strong>{beforeName || "選擇檔案"}</strong></span></button>{beforeName && <button className="chip-x" aria-label="移除前版 BOM" onClick={() => { setBefore([]); setBeforeName(""); setBeforeAudit(null); setOriginalBefore(null); }}><X size={15} /></button>}</div>
               <ArrowRight size={18} className="pair-arrow" />
-              <div className="file-chip"><button className="file-select" onClick={() => afterInput.current?.click()}><span className="file-icon after"><FileSpreadsheet size={18} /></span><span><small>後版 BOM</small><strong>{afterName || "選擇檔案"}</strong></span></button>{afterName && <button className="chip-x" aria-label="移除後版 BOM" onClick={() => { setAfter([]); setAfterName(""); setAfterAudit(null); }}><X size={15} /></button>}</div>
+              <div className="file-chip"><button className="file-select" onClick={() => afterInput.current?.click()}><span className="file-icon after"><FileSpreadsheet size={18} /></span><span><small>後版 BOM</small><strong>{afterName || "選擇檔案"}</strong></span></button>{afterName && <button className="chip-x" aria-label="移除後版 BOM" onClick={() => { setAfter([]); setAfterName(""); setAfterAudit(null); setOriginalAfter(null); }}><X size={15} /></button>}</div>
               <input ref={beforeInput} hidden type="file" accept=".xlsx,.xls,.csv,.tsv" onChange={(e) => handleBomFile(e, "before")} />
               <input ref={afterInput} hidden type="file" accept=".xlsx,.xls,.csv,.tsv" onChange={(e) => handleBomFile(e, "after")} />
             </div>

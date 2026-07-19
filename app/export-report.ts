@@ -2,7 +2,13 @@ import ExcelJS from "exceljs";
 import { bomStructureLabel, companyColumnLabels, type BomAlternative, type BomDiff, type CompanyColumnKey, type DiffPrimaryType, type ImportAudit } from "./bom-logic.ts";
 
 export type ReportSource = { fileName: string; sheetName: string; importedAt: string; audit: ImportAudit };
-export type ReportContext = { before?: ReportSource | null; after?: ReportSource | null };
+export type OriginalBomSource = { fileName: string; sheetName: string; data: ArrayBuffer; matrix: unknown[][] };
+export type ReportContext = {
+  before?: ReportSource | null;
+  after?: ReportSource | null;
+  originalBefore?: OriginalBomSource | null;
+  originalAfter?: OriginalBomSource | null;
+};
 
 const colors = {
   navy: "1F3A5F",
@@ -102,6 +108,80 @@ function saveBuffer(buffer: ExcelJS.Buffer, filename: string) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+function cloneExcelValue<T>(value: T): T {
+  if (value == null) return value;
+  return structuredClone(value);
+}
+
+function copyWorksheet(sourceWorkbook: ExcelJS.Workbook, source: ExcelJS.Worksheet, targetWorkbook: ExcelJS.Workbook, targetName: string) {
+  const target = targetWorkbook.addWorksheet(targetName, {
+    properties: cloneExcelValue(source.properties),
+    pageSetup: cloneExcelValue(source.pageSetup),
+    views: cloneExcelValue(source.views),
+    headerFooter: cloneExcelValue(source.headerFooter),
+  });
+  target.state = source.state;
+  target.autoFilter = cloneExcelValue(source.autoFilter);
+
+  for (let columnNumber = 1; columnNumber <= source.columnCount; columnNumber += 1) {
+    const sourceColumn = source.getColumn(columnNumber);
+    const targetColumn = target.getColumn(columnNumber);
+    if (sourceColumn.width != null) targetColumn.width = sourceColumn.width;
+    targetColumn.hidden = sourceColumn.hidden;
+    targetColumn.outlineLevel = sourceColumn.outlineLevel;
+    targetColumn.style = cloneExcelValue(sourceColumn.style);
+  }
+
+  source.eachRow({ includeEmpty: true }, (sourceRow, rowNumber) => {
+    const targetRow = target.getRow(rowNumber);
+    if (sourceRow.height != null) targetRow.height = sourceRow.height;
+    targetRow.hidden = sourceRow.hidden;
+    targetRow.outlineLevel = sourceRow.outlineLevel;
+    targetRow.style = cloneExcelValue(sourceRow.style);
+    sourceRow.eachCell({ includeEmpty: true }, (sourceCell, columnNumber) => {
+      const targetCell = targetRow.getCell(columnNumber);
+      targetCell.value = cloneExcelValue(sourceCell.value);
+      targetCell.style = cloneExcelValue(sourceCell.style);
+      targetCell.note = cloneExcelValue(sourceCell.note);
+      targetCell.dataValidation = cloneExcelValue(sourceCell.dataValidation);
+    });
+  });
+
+  source.model.merges.forEach((range) => target.mergeCells(range));
+  const sourceModel = source.model as ExcelJS.WorksheetModel & { conditionalFormattings?: ExcelJS.ConditionalFormattingOptions[] };
+  sourceModel.conditionalFormattings?.forEach((formatting) => target.addConditionalFormatting(cloneExcelValue(formatting)));
+  sourceModel.rowBreaks.forEach((rowBreak) => target.getRow(rowBreak.id).addPageBreak(rowBreak.min, rowBreak.max));
+  source.getImages().forEach((image) => {
+    const sourceImage = sourceWorkbook.getImage(Number(image.imageId));
+    if (!sourceImage) return;
+    target.addImage(targetWorkbook.addImage(sourceImage), image.range);
+  });
+  const backgroundImageId = source.getBackgroundImageId();
+  if (backgroundImageId) {
+    const sourceImage = sourceWorkbook.getImage(Number(backgroundImageId));
+    if (sourceImage) target.addBackgroundImage(targetWorkbook.addImage(sourceImage));
+  }
+  return target;
+}
+
+function copyMatrix(matrix: unknown[][], targetWorkbook: ExcelJS.Workbook, targetName: string) {
+  const target = targetWorkbook.addWorksheet(targetName);
+  matrix.forEach((values, index) => { target.getRow(index + 1).values = values as ExcelJS.CellValue[]; });
+  return target;
+}
+
+async function appendOriginalBom(targetWorkbook: ExcelJS.Workbook, source: OriginalBomSource, targetName: string) {
+  try {
+    const originalWorkbook = new ExcelJS.Workbook();
+    await originalWorkbook.xlsx.load(source.data as ExcelJS.Buffer);
+    const originalSheet = originalWorkbook.getWorksheet(source.sheetName) ?? originalWorkbook.worksheets[0];
+    if (originalSheet) return copyWorksheet(originalWorkbook, originalSheet, targetWorkbook, targetName);
+  } catch {
+    // Older or unusual workbooks still retain all original cell values through the import matrix.
+  }
+  return copyMatrix(source.matrix, targetWorkbook, targetName);
 }
 
 export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: string, context: ReportContext = {}) {
@@ -302,8 +382,21 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
   return workbook;
 }
 
-export async function exportBomReport(diffs: BomDiff[], beforeName: string, afterName: string, context: ReportContext = {}) {
+export async function buildBomReportWithOriginals(diffs: BomDiff[], beforeName: string, afterName: string, context: ReportContext = {}) {
   const workbook = buildBomReport(diffs, beforeName, afterName, context);
+  if (context.originalBefore) {
+    await appendOriginalBom(workbook, context.originalBefore, "前版原始 BOM");
+    workbook.getWorksheet("差異摘要")!.getCell("B4").value = { text: beforeName, hyperlink: "#'前版原始 BOM'!A1" };
+  }
+  if (context.originalAfter) {
+    await appendOriginalBom(workbook, context.originalAfter, "後版原始 BOM");
+    workbook.getWorksheet("差異摘要")!.getCell("E4").value = { text: afterName, hyperlink: "#'後版原始 BOM'!A1" };
+  }
+  return workbook;
+}
+
+export async function exportBomReport(diffs: BomDiff[], beforeName: string, afterName: string, context: ReportContext = {}) {
+  const workbook = await buildBomReportWithOriginals(diffs, beforeName, afterName, context);
   const buffer = await workbook.xlsx.writeBuffer();
   const stamp = new Date().toISOString().slice(0, 10).replaceAll("-", "");
   saveBuffer(buffer, `BOM_diff_report_${stamp}.xlsx`);
