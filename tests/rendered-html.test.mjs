@@ -497,6 +497,9 @@ test("includes offline launchers and GitHub-built Windows packages", async () =>
   assert.match(portableBuilder, /offline-server\.mjs/);
   assert.match(offlineServer, /noCompression: true/);
   assert.match(offlineServer, /host: "127\.0\.0\.1"/);
+  assert.match(offlineServer, /createServer/);
+  assert.match(offlineServer, /dist", "client/);
+  assert.match(offlineServer, /text\/css; charset=utf-8/);
   assert.match(installer, /PrivilegesRequired=lowest/);
   assert.match(installer, /\{autodesktop\}/);
   assert.match(installer, /BOMLens-Setup-x64/);
