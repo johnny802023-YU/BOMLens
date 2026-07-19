@@ -376,7 +376,7 @@ export default function Home() {
               <div className="table-wrap">
                 <table>
                   <thead><tr><th>主要異動</th><th>影響標籤</th><th>料號新增／刪除</th><th>插件位置差異</th><th>舊版料號／製造商資訊</th><th></th><th>新版料號／製造商資訊</th><th>數量</th></tr></thead>
-                  <tbody>{visible.map((item, index) => <tr key={item.after?.structureKey ?? item.before?.structureKey ?? `${item.ref}-${index}`}>
+                  <tbody>{visible.map((item, index) => <tr key={`${item.before?.structureKey ?? "none"}>${item.after?.structureKey ?? "none"}:${item.ref}:${index}`}>
                     <td><PrimaryTypeBadge item={item} /></td>
                     <td><ChangeFields fields={item.fields} /></td>
                     <td><BPartDifference item={item} /></td>
