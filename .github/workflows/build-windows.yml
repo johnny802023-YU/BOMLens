@@ -37,11 +37,11 @@ jobs:
           npm test
 
       - name: Build portable package
-        shell: powershell
+        shell: pwsh
         run: ./scripts/build-windows-portable.ps1 -SkipBuild
 
       - name: Verify portable runtime
-        shell: powershell
+        shell: pwsh
         run: |
           $root = Resolve-Path "release/BOMLens-Windows-x64-Portable"
           $node = Join-Path $root "runtime/node.exe"
@@ -65,7 +65,7 @@ jobs:
 
       - name: Locate Inno Setup
         id: inno
-        shell: powershell
+        shell: pwsh
         run: |
           $compiler = @(
             "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
@@ -79,11 +79,11 @@ jobs:
           "compiler=$compiler" >> $env:GITHUB_OUTPUT
 
       - name: Build setup installer
-        shell: powershell
+        shell: pwsh
         run: '& "${{ steps.inno.outputs.compiler }}" scripts/BOMLens.iss'
 
       - name: Verify setup installer
-        shell: powershell
+        shell: pwsh
         run: |
           $setup = Resolve-Path "release/BOMLens-Setup-x64.exe"
           $process = Start-Process -FilePath $setup -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") -Wait -PassThru
@@ -92,7 +92,7 @@ jobs:
           if (-not (Test-Path $installed)) { throw "安裝後找不到 BOMLens.exe。" }
 
       - name: Create checksums
-        shell: powershell
+        shell: pwsh
         run: |
           $files = @(
             "release/BOMLens-Windows-x64-Portable.zip",
