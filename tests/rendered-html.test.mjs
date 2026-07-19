@@ -48,6 +48,8 @@ test("server-renders the BOM comparison workspace", async () => {
   assert.doesNotMatch(html, /主替料變更|主體料變更/);
   assert.doesNotMatch(html, /來源 A/);
   assert.match(html, /線路圖比對/);
+  assert.match(html, /class="confidence-tooltip" role="tooltip"/);
+  assert.doesNotMatch(html, /structure-context|match-reason/);
   assert.match(html, /離線隱私模式/);
   assert.match(html, /不會上傳、同步或儲存/);
   assert.match(html, /PCB_Main_v1\.3\.xlsx/);
@@ -55,9 +57,10 @@ test("server-renders the BOM comparison workspace", async () => {
 });
 
 test("ships real BOM parsing, comparison, and export behavior", async () => {
-  const [page, layout, packageJson] = await Promise.all([
+  const [page, layout, styles, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
   assert.match(page, /XLSX\.read/);
@@ -68,6 +71,7 @@ test("ships real BOM parsing, comparison, and export behavior", async () => {
   assert.match(page, /getImageData/);
   assert.match(page, /application\/pdf/);
   assert.match(layout, /lang="zh-Hant"/);
+  assert.match(styles, /confidence-popover:focus-within/);
   assert.match(packageJson, /"xlsx"/);
   assert.match(packageJson, /"exceljs"/);
   assert.match(packageJson, /"offline:serve"/);

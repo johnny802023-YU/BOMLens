@@ -167,11 +167,17 @@ tr:hover td { background: #fbfcff; }
 .primary-badge.removed { color: #b14949; background: #fff0f0; }
 .primary-badge.changed { color: #2c63bd; background: #edf3ff; }
 .primary-badge.replacement { color: #9a651b; background: #fff3dc; }
-.primary-stack { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
-.structure-context { max-width: 105px; color: #526176; font-size: 9px; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; }
-.confidence { font-size: 9px; font-weight: 800; }
-.confidence.high { color: #16835d; }.confidence.medium { color: #9a651b; }.confidence.low { color: #b14949; }
-.match-reason { max-width: 105px; color: #838d9d; font-size: 9px; line-height: 1.4; }
+.primary-stack { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 5px; }
+.confidence-popover { position: relative; display: inline-flex; }
+.confidence { padding: 3px 6px; border: 0; border-radius: 4px; font-size: 9px; font-weight: 800; cursor: help; white-space: nowrap; }
+.confidence.high { color: #16835d; background: #edf8f3; }.confidence.medium { color: #9a651b; background: #fff6e5; }.confidence.low { color: #b14949; background: #fff0f0; }
+.confidence-tooltip { position: absolute; z-index: 25; left: 0; top: calc(100% + 7px); width: 240px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; border: 1px solid #34435c; border-radius: 7px; background: #17243a; color: #edf2f8; box-shadow: 0 8px 24px rgba(16,24,40,.24); font-size: 10px; line-height: 1.45; opacity: 0; visibility: hidden; pointer-events: none; transform: translateY(-4px); transition: opacity .14s ease, transform .14s ease, visibility .14s ease; }
+.confidence-tooltip span { display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
+.confidence-tooltip b { color: #9db9e7; font-size: 9px; }
+.confidence-tooltip em { color: #ffd28a; font-style: normal; font-weight: 700; }
+.confidence-popover:hover .confidence-tooltip, .confidence-popover:focus-within .confidence-tooltip { opacity: 1; visibility: visible; transform: translateY(0); }
+tbody tr:nth-last-child(-n+2) .confidence-tooltip { top: auto; bottom: calc(100% + 7px); transform: translateY(4px); }
+tbody tr:nth-last-child(-n+2) .confidence-popover:hover .confidence-tooltip, tbody tr:nth-last-child(-n+2) .confidence-popover:focus-within .confidence-tooltip { transform: translateY(0); }
 .refdes { font-family: var(--font-geist-mono); color: #364258; font-size: 12px; }
 .no-change { color: #a5acb7; }
 .b-diff-list { display: flex; flex-direction: column; gap: 5px; }
