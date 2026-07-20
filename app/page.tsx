@@ -448,19 +448,20 @@ function SessionDialog({ records, onClose }: { records: ImportRecord[]; onClose:
 }
 
 function PrimaryTypeBadge({ item }: { item: BomDiff }) {
-  const label = item.matchConfidence === "high" ? "高可信" : item.matchConfidence === "medium" ? "中可信" : "低可信";
+  const showConfidence = item.matchConfidence === "low";
+  const label = "低可信";
   const structure = diffStructureLabel(item);
   const confidenceLabel = `${item.needsReview ? "待確認，" : ""}${label}。${structure ? `所屬架構：${structure}。` : ""}配對依據：${item.matchReason}`;
   return <div className="primary-stack">
     <span className={`primary-badge ${primaryTypeTone(item.primaryType)}`}>{primaryTypeLabel(item.primaryType)}</span>
-    <span className="confidence-popover">
+    {showConfidence && <span className="confidence-popover">
       <button type="button" className={`confidence ${item.matchConfidence}`} aria-label={confidenceLabel}>{item.needsReview ? "待確認 · " : ""}{label}</button>
       <span className="confidence-tooltip" role="tooltip">
         {structure && <span><b>所屬架構</b>{structure}</span>}
         <span><b>配對依據</b>{item.matchReason}</span>
         {item.needsReview && <em>此群組需要人工確認</em>}
       </span>
-    </span>
+    </span>}
   </div>;
 }
 

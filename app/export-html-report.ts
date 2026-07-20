@@ -65,7 +65,7 @@ export function buildBomHtmlReport(diffs: BomDiff[], beforeName: string, afterNa
       <td><span class="plus">${diff.addedParts.length ? `＋ ${joinParts(diff.addedParts)}` : "—"}</span><span class="minus">${diff.removedParts.length ? `－ ${joinParts(diff.removedParts)}` : ""}</span></td>
       <td><span class="plus">${diff.addedPositions.length ? `＋ ${joinValues(diff.addedPositions)}` : "—"}</span><span class="minus">${diff.removedPositions.length ? `－ ${joinValues(diff.removedPositions)}` : ""}</span>${diff.replacementPositions.length ? `<span class="change">${joinValues(diff.replacementPositions)} 換料</span>` : ""}</td>
       <td class="qty">${diff.before?.qty ?? 0} → ${diff.after?.qty ?? 0}</td>
-      <td><span class="confidence ${diff.matchConfidence}">${diff.needsReview ? "待確認 · " : ""}${diff.matchConfidence === "high" ? "高" : diff.matchConfidence === "medium" ? "中" : "低"}</span><small>${escapeHtml(diff.matchReason)}</small></td>
+      <td>${diff.matchConfidence === "low" ? `<span class="confidence low">${diff.needsReview ? "待確認 · " : ""}低可信</span><small>${escapeHtml(diff.matchReason)}</small>` : "—"}</td>
     </tr>`).join("");
 
   const lifecycleRows = orderedDiffs.flatMap((diff) => [

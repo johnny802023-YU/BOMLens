@@ -2,7 +2,7 @@
 /* eslint-disable react-hooks/set-state-in-effect -- file and search changes intentionally reset the local PDF viewer state */
 
 import { ChevronLeft, ChevronRight, FileSearch } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 import { buildPageReferenceIndex, centeredPdfHitScroll, lookupReferenceHits, mergeReferenceIndex, normalizeReference, PDF_REFERENCE_INDEX_SCALE, type PdfReferenceIndex, type PdfTextBox } from "./pdf-search";
@@ -120,6 +120,7 @@ export function PdfSchematicViewer({ file, target, sideLabel, side, scale, syncE
   const renderTask = useRef<{ cancel(): void } | null>(null);
   const applyingSyncedScroll = useRef(false);
   const scrollFrame = useRef<number | null>(null);
+  const locateFrame = useRef<number | null>(null);
   const lastScrollRatio = useRef({ x: 0, y: 0 });
   const locatedTarget = useRef("");
   const [document, setDocument] = useState<PDFDocumentProxy | null>(null);
@@ -133,6 +134,7 @@ export function PdfSchematicViewer({ file, target, sideLabel, side, scale, syncE
   const [fromCache, setFromCache] = useState(false);
   const [renderError, setRenderError] = useState(false);
   const [hitIndex, setHitIndex] = useState(0);
+  const [centerRevision, setCenterRevision] = useState(0);
 
   useEffect(() => {
     const entry = getIndexEntry(file);
@@ -157,12 +159,47 @@ export function PdfSchematicViewer({ file, target, sideLabel, side, scale, syncE
       trimPdfCache();
       renderTask.current?.cancel();
       if (scrollFrame.current != null) window.cancelAnimationFrame(scrollFrame.current);
+      if (locateFrame.current != null) window.cancelAnimationFrame(locateFrame.current);
     };
   }, [file]);
 
   const normalizedTarget = normalizeReference(target);
   const hits = useMemo(() => lookupReferenceHits(referenceIndex, normalizedTarget), [referenceIndex, normalizedTarget]);
   const currentHit = hits[hitIndex];
+
+  const centerCurrentHit = useCallback(() => {
+    const element = scrollRef.current;
+    const pageElement = pageRef.current;
+    if (!element || !pageElement || currentHit?.page !== pageNumber) return;
+    const centered = centeredPdfHitScroll(
+      currentHit,
+      scale,
+      element.clientWidth,
+      element.clientHeight,
+      element.scrollWidth,
+      element.scrollHeight,
+      pageElement.offsetLeft,
+      pageElement.offsetTop,
+    );
+    applyingSyncedScroll.current = true;
+    element.scrollLeft = centered.left;
+    element.scrollTop = centered.top;
+    lastScrollRatio.current = {
+      x: centered.left / Math.max(1, element.scrollWidth - element.clientWidth),
+      y: centered.top / Math.max(1, element.scrollHeight - element.clientHeight),
+    };
+    window.requestAnimationFrame(() => { applyingSyncedScroll.current = false; });
+  }, [currentHit, pageNumber, scale]);
+
+  const scheduleCenterCurrentHit = useCallback(() => {
+    if (locateFrame.current != null) window.cancelAnimationFrame(locateFrame.current);
+    locateFrame.current = window.requestAnimationFrame(() => {
+      locateFrame.current = window.requestAnimationFrame(() => {
+        locateFrame.current = null;
+        centerCurrentHit();
+      });
+    });
+  }, [centerCurrentHit]);
 
   useEffect(() => {
     locatedTarget.current = "";
@@ -189,42 +226,29 @@ export function PdfSchematicViewer({ file, target, sideLabel, side, scale, syncE
       canvas.height = viewport.height;
       canvas.style.width = `${viewport.width}px`;
       canvas.style.height = `${viewport.height}px`;
+      const pageElement = pageRef.current;
+      if (pageElement) {
+        pageElement.style.width = `${viewport.width}px`;
+        pageElement.style.height = `${viewport.height}px`;
+      }
       setPageSize({ width: viewport.width, height: viewport.height });
-      window.requestAnimationFrame(() => {
+      if (currentHit?.page === pageNumber) {
+        scheduleCenterCurrentHit();
+      } else window.requestAnimationFrame(() => {
         const element = scrollRef.current;
         if (!element) return;
-        if (currentHit?.page === pageNumber) {
-          const pageElement = pageRef.current;
-          const centered = centeredPdfHitScroll(
-            currentHit,
-            scale,
-            element.clientWidth,
-            element.clientHeight,
-            element.scrollWidth,
-            element.scrollHeight,
-            pageElement?.offsetLeft ?? 0,
-            pageElement?.offsetTop ?? 0,
-          );
-          applyingSyncedScroll.current = true;
-          element.scrollLeft = centered.left;
-          element.scrollTop = centered.top;
-          lastScrollRatio.current = {
-            x: centered.left / Math.max(1, element.scrollWidth - element.clientWidth),
-            y: centered.top / Math.max(1, element.scrollHeight - element.clientHeight),
-          };
-          window.requestAnimationFrame(() => { applyingSyncedScroll.current = false; });
-        } else {
-          element.scrollLeft = lastScrollRatio.current.x * Math.max(0, element.scrollWidth - element.clientWidth);
-          element.scrollTop = lastScrollRatio.current.y * Math.max(0, element.scrollHeight - element.clientHeight);
-        }
+        element.scrollLeft = lastScrollRatio.current.x * Math.max(0, element.scrollWidth - element.clientWidth);
+        element.scrollTop = lastScrollRatio.current.y * Math.max(0, element.scrollHeight - element.clientHeight);
       });
       renderTask.current?.cancel();
       const task = page.render({ canvas, canvasContext: context, viewport });
       renderTask.current = task;
-      task.promise.catch((error) => { if (error?.name !== "RenderingCancelledException") setRenderError(true); });
+      task.promise.then(() => {
+        if (currentHit?.page === pageNumber) scheduleCenterCurrentHit();
+      }).catch((error) => { if (error?.name !== "RenderingCancelledException") setRenderError(true); });
     });
     return () => renderTask.current?.cancel();
-  }, [currentHit, document, pageNumber, scale]);
+  }, [currentHit, document, pageNumber, scale, scheduleCenterCurrentHit]);
 
   useEffect(() => {
     const element = scrollRef.current;
@@ -255,6 +279,13 @@ export function PdfSchematicViewer({ file, target, sideLabel, side, scale, syncE
     setPageNumber(hits[normalized].page);
   };
 
+  const recenterHit = () => {
+    if (!currentHit) return;
+    setCenterRevision((revision) => revision + 1);
+    if (currentHit.page !== pageNumber) setPageNumber(currentHit.page);
+    else scheduleCenterCurrentHit();
+  };
+
   return <div className="pdf-viewer">
     <div className="pdf-status">
       <span>{renderError || status === "error" ? "PDF 讀取失敗" : status === "indexing" ? `已處理 ${processedPages}／${totalPages || "…"} 頁・每批平行 ${batchSize} 頁` : status === "no-text" ? "PDF 沒有可搜尋文字" : fromCache ? `已使用索引快取・共 ${totalPages} 頁` : `索引表完成・共 ${totalPages} 頁`}</span>
@@ -264,12 +295,13 @@ export function PdfSchematicViewer({ file, target, sideLabel, side, scale, syncE
     <div className="pdf-page-controls">
       <button disabled={pageNumber <= 1} onClick={() => setPageNumber((page) => page - 1)}><ChevronLeft size={15} /></button><span>第 {pageNumber}／{document?.numPages ?? 0} 頁</span><button disabled={!document || pageNumber >= document.numPages} onClick={() => setPageNumber((page) => page + 1)}><ChevronRight size={15} /></button>
       <div className="zoom-controls"><button disabled={scale <= 0.6} onClick={() => onScaleChange(side, Math.max(0.6, scale - 0.15))}>−</button><span>{Math.round(scale * 100)}%</span><button disabled={scale >= 2.4} onClick={() => onScaleChange(side, Math.min(2.4, scale + 0.15))}>＋</button></div>
+      {currentHit && <button className="recenter-hit" onClick={recenterHit}>重新置中 {normalizedTarget}</button>}
       {hits.length > 1 && <div className="hit-controls"><button onClick={() => selectHit(hitIndex - 1)}>上一筆</button><span>{hitIndex + 1}／{hits.length}</span><button onClick={() => selectHit(hitIndex + 1)}>下一筆</button></div>}
     </div>
     <div className="pdf-page-scroll" ref={scrollRef} onScroll={handleScroll}>
       <div className="pdf-page" ref={pageRef} style={{ width: pageSize.width, height: pageSize.height }}>
         <canvas ref={canvasRef} />
-        {currentHit?.page === pageNumber && <span className="pdf-highlight" style={{ left: Math.max(0, (currentHit.x - 5) * scale / PDF_REFERENCE_INDEX_SCALE), top: Math.max(0, (currentHit.y - 4) * scale / PDF_REFERENCE_INDEX_SCALE), width: (currentHit.width + 10) * scale / PDF_REFERENCE_INDEX_SCALE, height: (currentHit.height + 8) * scale / PDF_REFERENCE_INDEX_SCALE }} />}
+        {currentHit?.page === pageNumber && <span key={`${normalizedTarget}-${hitIndex}-${centerRevision}`} className="pdf-highlight" style={{ left: Math.max(0, (currentHit.x - 5) * scale / PDF_REFERENCE_INDEX_SCALE), top: Math.max(0, (currentHit.y - 4) * scale / PDF_REFERENCE_INDEX_SCALE), width: (currentHit.width + 10) * scale / PDF_REFERENCE_INDEX_SCALE, height: (currentHit.height + 8) * scale / PDF_REFERENCE_INDEX_SCALE }} />}
       </div>
     </div>
   </div>;

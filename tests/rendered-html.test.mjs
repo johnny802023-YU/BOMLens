@@ -48,7 +48,7 @@ test("server-renders the BOM comparison workspace", async () => {
   assert.doesNotMatch(html, /主替料變更|主體料變更/);
   assert.doesNotMatch(html, /來源 A/);
   assert.match(html, /線路圖比對/);
-  assert.match(html, /class="confidence-tooltip" role="tooltip"/);
+  assert.doesNotMatch(html, /高可信|中可信/);
   assert.doesNotMatch(html, /structure-context|match-reason/);
   assert.match(html, /離線隱私模式/);
   assert.match(html, /不會上傳、同步或儲存/);
@@ -67,6 +67,7 @@ test("ships real BOM parsing, comparison, and export behavior", async () => {
   assert.match(page, /analyzeCompanyBomMatrix/);
   assert.match(page, /book\.SheetNames\.map/);
   assert.match(page, /待人工確認/);
+  assert.match(page, /showConfidence = item\.matchConfidence === "low"/);
   assert.match(page, /exportBomReport/);
   assert.match(page, /getImageData/);
   assert.match(page, /application\/pdf/);
@@ -186,6 +187,7 @@ test("builds a standalone offline HTML report", async () => {
   assert.match(html, /69-ROOT › VB-BOARD-T/);
   assert.match(html, /Content-Security-Policy/);
   assert.match(html, /OLD&lt;&amp;/);
+  assert.doesNotMatch(html, /class="confidence high"|class="confidence medium"/);
   assert.doesNotMatch(html, /https?:\/\//);
 });
 
@@ -267,6 +269,9 @@ test("progressively indexes and caches schematic PDFs", async () => {
   assert.match(viewer, /onScaleChange/);
   assert.match(viewer, /centeredPdfHitScroll/);
   assert.match(viewer, /currentHit\?\.page === pageNumber/);
+  assert.match(viewer, /scheduleCenterCurrentHit/);
+  assert.match(viewer, /重新置中/);
+  assert.match(viewer, /pageElement\.style\.width/);
   assert.match(styles, /\.sheet-preview\s*\{[^}]*overflow:\s*hidden/);
   assert.match(styles, /\.pdf-viewer\s*\{[^}]*min-height:\s*0[^}]*overflow:\s*hidden/);
   assert.match(styles, /\.pdf-page-scroll\s*\{[^}]*min-height:\s*0[^}]*overflow:\s*auto/);

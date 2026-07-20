@@ -286,7 +286,7 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
       diff.before ? listManufacturerNames(diff.before.alternatives) : "", diff.after ? listManufacturerNames(diff.after.alternatives) : "",
       listParts(diff.addedParts), listParts(diff.removedParts), diff.addedPositions.join(", "), diff.removedPositions.join(", "),
       diff.replacementPositions.join(", "), diff.before?.qty ?? 0, diff.after?.qty ?? 0, diff.before?.ref ?? "", diff.after?.ref ?? "",
-      diff.matchConfidence === "high" ? "高" : diff.matchConfidence === "medium" ? "中" : "低", diff.matchReason, diff.needsReview ? "是" : "否",
+      diff.matchConfidence === "low" ? "低可信" : "", diff.matchConfidence === "low" ? diff.matchReason : "", diff.needsReview ? "是" : "否",
       diff.before?.sourceRows?.join(", ") ?? "", diff.after?.sourceRows?.join(", ") ?? "",
     ];
     row.height = diffStructureLabel(diff) ? 54 : 40;
