@@ -253,6 +253,7 @@ test("centers schematic reference hits and clamps page-edge positions", () => {
 
 test("progressively indexes and caches schematic PDFs", async () => {
   const viewer = await readFile(new URL("../app/pdf-schematic-viewer.tsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
   assert.match(viewer, /Map<File, IndexEntry>/);
   assert.match(viewer, /已處理.*processedPages/);
   assert.match(viewer, /背景索引中/);
@@ -266,6 +267,9 @@ test("progressively indexes and caches schematic PDFs", async () => {
   assert.match(viewer, /onScaleChange/);
   assert.match(viewer, /centeredPdfHitScroll/);
   assert.match(viewer, /currentHit\?\.page === pageNumber/);
+  assert.match(styles, /\.sheet-preview\s*\{[^}]*overflow:\s*hidden/);
+  assert.match(styles, /\.pdf-viewer\s*\{[^}]*min-height:\s*0[^}]*overflow:\s*hidden/);
+  assert.match(styles, /\.pdf-page-scroll\s*\{[^}]*min-height:\s*0[^}]*overflow:\s*auto/);
 });
 
 test("maps company columns by header name and groups substitute parts", () => {
