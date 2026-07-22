@@ -3,6 +3,22 @@ export type PdfReferenceIndex = Map<string, PdfTextBox[]>;
 
 export const PDF_REFERENCE_INDEX_SCALE = 1.35;
 
+export type ViewRect = { left: number; top: number; width: number; height: number };
+
+export function centeredRenderedHitScroll(
+  currentScroll: { left: number; top: number },
+  viewport: ViewRect,
+  hit: ViewRect,
+  maximum: { left: number; top: number },
+) {
+  const hitCenterX = hit.left + hit.width / 2;
+  const hitCenterY = hit.top + hit.height / 2;
+  return {
+    left: Math.min(maximum.left, Math.max(0, currentScroll.left + hitCenterX - viewport.left - viewport.width / 2)),
+    top: Math.min(maximum.top, Math.max(0, currentScroll.top + hitCenterY - viewport.top - viewport.height / 2)),
+  };
+}
+
 export function centeredPdfHitScroll(
   hit: PdfTextBox,
   renderScale: number,

@@ -65,9 +65,9 @@ export type ImportAudit = {
 
 const aliases = {
   ref: ["ref", "reference", "references", "designator", "refdes", "reference designator", "位號", "位置", "項次"],
-  part: ["part", "part number", "part no", "pn", "料號", "零件料號", "公司料號"],
-  manufacturerPart: ["mpn", "manufacturer part number", "製造商料號", "製造商型號"],
-  manufacturerName: ["manufacturer", "manufacturer name", "mfr", "製造商", "製造商名稱"],
+  part: ["part", "part number", "part no", "pn", "料號", "主件料號", "零件料號", "公司料號", "2.主件料號"],
+  manufacturerPart: ["mpn", "manufacturer part number", "製造商料號", "製造廠商料號", "製造商型號", "16製造廠商料號"],
+  manufacturerName: ["manufacturer", "manufacturer name", "mfr", "製造商", "製造商名稱", "製造廠商", "11製造廠商"],
   value: ["value", "component value", "規格", "數值", "值"],
   description: ["description", "desc", "comment", "item description", "說明", "描述", "品名"],
   qty: ["qty", "quantity", "count", "數量", "用量", "組成用量"],
@@ -87,26 +87,26 @@ type CompanyColumns = {
 
 export const companyColumnLabels: Record<CompanyColumnKey, string> = {
   ref: "項次",
-  part: "料號",
+  part: "主件料號",
   qty: "數量／組成用量",
   positions: "插件位置",
   description: "品名／描述",
   spec: "規格",
-  manufacturerName: "製造商名稱",
-  manufacturerPart: "製造商料號",
+  manufacturerName: "製造廠商",
+  manufacturerPart: "製造廠商料號",
 };
 
 export const requiredCompanyColumns: CompanyColumnKey[] = ["ref", "part", "qty", "positions"];
 
 const companyHeaderAliases = {
   ref: ["項次", "序號", "item", "item no", "item number"],
-  part: ["料號", "公司料號", "零件料號", "part", "part no", "part number", "pn"],
+  part: ["主件料號", "2.主件料號", "料號", "公司料號", "零件料號", "part", "part no", "part number", "pn"],
   qty: ["組成用量", "數量", "用量", "qty", "quantity", "count"],
   positions: ["插件位置", "位號", "reference designator", "refdes", "placement", "placements", "location", "locations"],
   description: ["品名", "描述", "說明", "description", "desc", "item description"],
   spec: ["規格", "數值", "值", "spec", "specification", "value"],
-  manufacturerName: ["製造商名稱", "製造商", "manufacturer name", "manufacturer", "mfr"],
-  manufacturerPart: ["製造商料號", "製造商型號", "manufacturer part number", "mpn"],
+  manufacturerName: ["製造廠商", "11製造廠商", "製造商名稱", "製造商", "manufacturer name", "manufacturer", "mfr"],
+  manufacturerPart: ["製造廠商料號", "16製造廠商料號", "製造商料號", "製造商型號", "manufacturer part number", "mpn"],
 };
 
 function text(value: unknown) {
@@ -454,8 +454,10 @@ export function compareBom(before: BomItem[], after: BomItem[]): BomDiff[] {
       fields = fields.filter((field) => field !== "新增替料" && field !== "刪除替料");
       fields.push("更換料號");
     }
-    if (newParts.length) fields.push("新增料號");
-    if (deletedParts.length) fields.push("刪除料號");
+    const substituteOnlyAddition = addedParts.length > 0 && removedParts.length === 0;
+    const substituteOnlyRemoval = removedParts.length > 0 && addedParts.length === 0;
+    if (newParts.length && !substituteOnlyAddition) fields.push("新增料號");
+    if (deletedParts.length && !substituteOnlyRemoval) fields.push("刪除料號");
     const categories: DiffCategory[] = [];
     const positionRelocated = addedPositions.length > 0
       && removedPositions.length > 0
@@ -613,8 +615,8 @@ function intersectionValues(left: string[], right: string[]) {
 
 function compactFields(addedParts: BomAlternative[], removedParts: BomAlternative[], addedPositions: string[], removedPositions: string[], addedAsSubstitute = false, removedAsSubstitute = false) {
   return [
-    addedParts.length ? (addedAsSubstitute ? "新增替料" : "新增元件") : "",
-    removedParts.length ? (removedAsSubstitute ? "刪除替料" : "移除元件") : "",
+    addedParts.length ? (addedAsSubstitute ? "新增替料" : "新增料號") : "",
+    removedParts.length ? (removedAsSubstitute ? "刪除替料" : "刪除料號") : "",
     addedPositions.length ? "新增插件位置" : "",
     removedPositions.length ? "移除插件位置" : "",
   ].filter(Boolean);

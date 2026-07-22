@@ -2,12 +2,12 @@ import { bomStructureLabel, companyColumnLabels, sortBomDiffsForAll, type BomAlt
 import type { ReportContext } from "./export-report";
 
 const primaryLabels: Record<DiffPrimaryType, string> = {
-  componentAdded: "新增元件",
-  componentRemoved: "移除元件",
-  substituteAdded: "新增替料",
-  substituteRemoved: "刪除替料",
-  partReplaced: "同位置換料",
-  positionChanged: "位置變更",
+  componentAdded: "新增",
+  componentRemoved: "刪除",
+  substituteAdded: "新增",
+  substituteRemoved: "刪除",
+  partReplaced: "變更",
+  positionChanged: "變更",
   same: "相同",
 };
 
@@ -59,9 +59,9 @@ export function buildBomHtmlReport(diffs: BomDiff[], beforeName: string, afterNa
     <tr>
       <td><span class="type ${typeTone(diff.primaryType)}">${escapeHtml(primaryLabels[diff.primaryType])}</span>${structureHtml(diff)}</td>
       <td>${joinValues(diff.fields)}</td>
-      <td><strong>${diff.before ? joinParts(diff.before.alternatives) : "—"}</strong><small><b>製造商料號</b> ${diff.before ? joinValues(diff.before.alternatives.map((part) => part.manufacturerPart).filter(Boolean)) : "—"}</small><small><b>製造商名稱</b> ${diff.before ? joinValues(diff.before.alternatives.map((part) => part.manufacturerName ?? "").filter(Boolean)) : "—"}</small></td>
+      <td><strong>${diff.before ? joinParts(diff.before.alternatives) : "—"}</strong><small><b>製造廠商料號</b> ${diff.before ? joinValues(diff.before.alternatives.map((part) => part.manufacturerPart).filter(Boolean)) : "—"}</small><small><b>製造廠商</b> ${diff.before ? joinValues(diff.before.alternatives.map((part) => part.manufacturerName ?? "").filter(Boolean)) : "—"}</small></td>
       <td class="arrow">→</td>
-      <td><strong>${diff.after ? joinParts(diff.after.alternatives) : "—"}</strong><small><b>製造商料號</b> ${diff.after ? joinValues(diff.after.alternatives.map((part) => part.manufacturerPart).filter(Boolean)) : "—"}</small><small><b>製造商名稱</b> ${diff.after ? joinValues(diff.after.alternatives.map((part) => part.manufacturerName ?? "").filter(Boolean)) : "—"}</small></td>
+      <td><strong>${diff.after ? joinParts(diff.after.alternatives) : "—"}</strong><small><b>製造廠商料號</b> ${diff.after ? joinValues(diff.after.alternatives.map((part) => part.manufacturerPart).filter(Boolean)) : "—"}</small><small><b>製造廠商</b> ${diff.after ? joinValues(diff.after.alternatives.map((part) => part.manufacturerName ?? "").filter(Boolean)) : "—"}</small></td>
       <td><span class="plus">${diff.addedParts.length ? `＋ ${joinParts(diff.addedParts)}` : "—"}</span><span class="minus">${diff.removedParts.length ? `－ ${joinParts(diff.removedParts)}` : ""}</span></td>
       <td><span class="plus">${diff.addedPositions.length ? `＋ ${joinValues(diff.addedPositions)}` : "—"}</span><span class="minus">${diff.removedPositions.length ? `－ ${joinValues(diff.removedPositions)}` : ""}</span>${diff.replacementPositions.length ? `<span class="change">${joinValues(diff.replacementPositions)} 換料</span>` : ""}</td>
       <td class="qty">${diff.before?.qty ?? 0} → ${diff.after?.qty ?? 0}</td>
@@ -73,7 +73,7 @@ export function buildBomHtmlReport(diffs: BomDiff[], beforeName: string, afterNa
     ...diff.deletedParts.map((part) => `<tr><td><span class="type removed">新版完全移除</span></td><td>${escapeHtml(partLabel(part))}</td><td>${escapeHtml(part.manufacturerPart || "—")}</td><td>${escapeHtml(part.manufacturerName || "—")}</td><td>${joinValues(diff.before?.positions ?? [])}</td><td>${diff.before?.qty ?? 0}</td><td>${escapeHtml(primaryLabels[diff.primaryType])}${structureHtml(diff)}</td></tr>`),
   ]).join("");
   const reviewRows = orderedDiffs.filter((diff) => diff.needsReview).map((diff) => `<tr><td>${escapeHtml(primaryLabels[diff.primaryType])}${structureHtml(diff)}</td><td>${diff.before ? joinParts(diff.before.alternatives) : "—"}</td><td>${diff.after ? joinParts(diff.after.alternatives) : "—"}</td><td>${joinValues(diff.after?.positions ?? diff.before?.positions ?? [])}</td><td>${escapeHtml(diff.matchReason)}</td><td>${escapeHtml(diff.before?.sourceRows?.join(", ") || "—")}</td><td>${escapeHtml(diff.after?.sourceRows?.join(", ") || "—")}</td></tr>`).join("");
-  const auditRows = ([{ label: "前版", source: context.before }, { label: "後版", source: context.after }] as const).flatMap(({ label, source }) => {
+  const auditRows = ([{ label: "舊版", source: context.before }, { label: "新版", source: context.after }] as const).flatMap(({ label, source }) => {
     if (!source) return [];
     const mappings = (Object.entries(source.audit.mappingLabels) as Array<[CompanyColumnKey, string]>).map(([key, value]) => `${escapeHtml(companyColumnLabels[key])}＝${escapeHtml(value)}`).join("、");
     const issues = source.audit.issues.length ? source.audit.issues.map((issue) => escapeHtml(issue.message)).join("<br>") : "資料檢查通過，沒有警告";
@@ -95,11 +95,11 @@ export function buildBomHtmlReport(diffs: BomDiff[], beforeName: string, afterNa
   <main class="report">
     <header class="hero"><h1>BOM 版本差異報告</h1><p>完全離線產生，不包含任何外部連線或資源。</p></header>
     <div class="actions"><button type="button" onclick="window.print()">列印／另存 PDF</button></div>
-    <div class="files"><div class="file"><small>前版 BOM</small><strong>${escapeHtml(beforeName)}</strong></div><div class="arrow">→</div><div class="file"><small>後版 BOM</small><strong>${escapeHtml(afterName)}</strong></div></div>
+    <div class="files"><div class="file"><small>舊版 BOM</small><strong>${escapeHtml(beforeName)}</strong></div><div class="arrow">→</div><div class="file"><small>新版 BOM</small><strong>${escapeHtml(afterName)}</strong></div></div>
     <div class="cards"><div class="card"><small>差異群組</small><strong>${diffs.length}</strong></div><div class="card new"><small>新版完全新料</small><strong>${newParts.size}</strong></div><div class="card removed"><small>新版完全移除</small><strong>${deletedParts.size}</strong></div></div>
-    <section><h2>差異明細</h2><div class="table-wrap"><table><thead><tr><th>主要異動</th><th>影響標籤</th><th>舊版料號／製造商資訊</th><th></th><th>新版料號／製造商資訊</th><th>料號新增／刪除</th><th>插件位置差異</th><th>數量</th><th>配對可信度</th></tr></thead><tbody>${detailRows || `<tr><td colspan="9" class="empty">沒有差異</td></tr>`}</tbody></table></div></section>
-    <section><h2>料號生命週期</h2><p class="note">集中列出新版完全新料與新版完全移除料號；製造商料號與製造商名稱只供識別，不參與差異判斷。</p><div class="table-wrap"><table><thead><tr><th>生命週期</th><th>料號</th><th>製造商料號</th><th>製造商名稱</th><th>插件位置</th><th>數量</th><th>主要異動</th></tr></thead><tbody>${lifecycleRows || `<tr><td colspan="7" class="empty">沒有完全新增或移除的料號</td></tr>`}</tbody></table></div></section>
-    <section><h2>待人工確認</h2><p class="note">配對可信度偏低或有多個合理候選時列在這裡。</p><div class="table-wrap"><table><thead><tr><th>主要異動</th><th>舊版料號</th><th>新版料號</th><th>插件位置</th><th>配對依據</th><th>前版原始列</th><th>後版原始列</th></tr></thead><tbody>${reviewRows || `<tr><td colspan="7" class="empty">沒有待人工確認項目</td></tr>`}</tbody></table></div></section>
+    <section><h2>差異明細</h2><div class="table-wrap"><table><thead><tr><th>主要異動</th><th>影響標籤</th><th>舊版主件料號／製造廠商資訊</th><th></th><th>新版主件料號／製造廠商資訊</th><th>料號新增／刪除</th><th>插件位置差異</th><th>數量</th><th>配對可信度</th></tr></thead><tbody>${detailRows || `<tr><td colspan="9" class="empty">沒有差異</td></tr>`}</tbody></table></div></section>
+    <section><h2>料號生命週期</h2><p class="note">集中列出新版完全新料與新版完全移除料號；製造廠商料號與製造廠商只供識別，不參與差異判斷。</p><div class="table-wrap"><table><thead><tr><th>生命週期</th><th>主件料號</th><th>製造廠商料號</th><th>製造廠商</th><th>插件位置</th><th>數量</th><th>主要異動</th></tr></thead><tbody>${lifecycleRows || `<tr><td colspan="7" class="empty">沒有完全新增或移除的料號</td></tr>`}</tbody></table></div></section>
+    <section><h2>待人工確認</h2><p class="note">配對可信度偏低或有多個合理候選時列在這裡。</p><div class="table-wrap"><table><thead><tr><th>主要異動</th><th>舊版料號</th><th>新版料號</th><th>插件位置</th><th>配對依據</th><th>舊版原始列</th><th>新版原始列</th></tr></thead><tbody>${reviewRows || `<tr><td colspan="7" class="empty">沒有待人工確認項目</td></tr>`}</tbody></table></div></section>
     <section><h2>匯入稽核</h2><div class="table-wrap"><table><thead><tr><th>版本</th><th>檔案</th><th>工作表</th><th>標題列</th><th>欄位對應</th><th>資料品質提示</th></tr></thead><tbody>${auditRows || `<tr><td colspan="6" class="empty">本次報告沒有匯入稽核資料</td></tr>`}</tbody></table></div></section>
   </main>
 </body>

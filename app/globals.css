@@ -224,9 +224,17 @@ tbody tr:nth-last-child(-n+2) .confidence-popover:hover .confidence-tooltip, tbo
 .table-footer { min-height: 46px; padding: 0 18px; display: flex; align-items: center; justify-content: space-between; color: #8992a1; font-size: 10px; }
 .legend { display: flex; align-items: center; gap: 6px; }
 .legend i { width: 6px; height: 6px; border-radius: 50%; display: inline-block; margin-left: 8px; }
+.review-summary { height: 27px; padding: 0 8px 0 1px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: inherit; font: inherit; }
+.review-summary:hover, .review-summary.active { border-color: #ebc884; background: #fff8e8; color: #875b15; }
+.review-summary i { margin-left: 0; }
 .green-dot { background: var(--green); } .amber-dot { background: #e09a25; }
 
 .schematic-panel { min-height: 500px; position: relative; }
+.schematic-panel.expanded { position: fixed; z-index: 75; inset: 14px; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border: 1px solid #cfd6e1; border-radius: 10px; background: white; box-shadow: 0 24px 80px rgba(10,18,31,.38); }
+.schematic-panel.expanded .sheet-grid { flex: 1; min-height: 0; }
+.schematic-panel.expanded .sheet-card { min-height: 0; display: flex; flex-direction: column; }
+.schematic-panel.expanded .sheet-preview { height: auto; flex: 1; }
+.schematic-panel.expanded .diff-canvas { flex: 1; min-height: 0; overflow: auto; }
 .schematic-toolbar { min-height: 60px; padding: 11px 17px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; }
 .schematic-toolbar > div:first-child { display: flex; flex-direction: column; gap: 4px; }
 .schematic-toolbar strong { font-size: 12px; }
@@ -236,8 +244,9 @@ tbody tr:nth-last-child(-n+2) .confidence-popover:hover .confidence-tooltip, tbo
 .schematic-search input { min-width: 0; flex: 1; border: 0; outline: 0; color: #344054; font-size: 11px; }
 .schematic-search button { width: 23px; height: 23px; padding: 0; border: 0; border-radius: 4px; display: grid; place-items: center; background: #f1f3f6; color: #8791a0; }
 .schematic-options { display: flex; align-items: center; gap: 6px; }
-.schematic-options > button { height: 30px; padding: 0 9px; border: 1px solid #dce1e8; border-radius: 5px; background: white; color: #687386; font-size: 10px; white-space: nowrap; }
+.schematic-options > button { height: 30px; padding: 0 9px; border: 1px solid #dce1e8; border-radius: 5px; background: white; color: #687386; font-size: 10px; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
 .schematic-options > button.sync-active { border-color: #afc6f2; background: #edf3ff; color: #2c63bd; font-weight: 700; }
+.schematic-options > button.expand-active { border-color: #aebee0; background: #263b62; color: white; }
 .view-toggle { padding: 3px; border-radius: 6px; background: #f0f2f5; }
 .view-toggle button { height: 27px; border: 0; padding: 0 12px; border-radius: 4px; color: #7d8694; background: transparent; font-size: 10px; }
 .view-toggle button.active { background: white; color: #2d61bd; box-shadow: 0 1px 3px rgba(16,24,40,.12); }

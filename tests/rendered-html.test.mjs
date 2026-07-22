@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { analyzeCompanyBomMatrix, canonicalPartNumber, compareBom, findCompanyHeader, parseCompanyBomMatrix, parseQuantity, sortBomDiffsForAll } from "../app/bom-logic.ts";
-import { buildPageReferenceIndex, centeredPdfHitScroll, findReferenceHits, lookupReferenceHits, normalizeReference } from "../app/pdf-search.ts";
+import { analyzeCompanyBomMatrix, canonicalPartNumber, compareBom, detectCompanyColumns, findCompanyHeader, parseCompanyBomMatrix, parseQuantity, sortBomDiffsForAll } from "../app/bom-logic.ts";
+import { buildPageReferenceIndex, centeredPdfHitScroll, centeredRenderedHitScroll, findReferenceHits, lookupReferenceHits, normalizeReference } from "../app/pdf-search.ts";
 import ExcelJS from "exceljs";
 import * as XLSX from "xlsx";
 
@@ -31,17 +31,16 @@ test("server-renders the BOM comparison workspace", async () => {
   assert.match(html, /依標題名稱自動定位欄位/);
   assert.match(html, /主要異動/);
   assert.match(html, /影響標籤/);
-  assert.match(html, /同位置換料/);
-  assert.match(html, /位置變更/);
   assert.match(html, /新版完全新料/);
   assert.match(html, /新版完全移除/);
-  assert.match(html, /新增元件/);
+  assert.match(html, /新增料號/);
   assert.match(html, /新增替料/);
   assert.match(html, /刪除替料/);
-  assert.match(html, /移除元件/);
+  assert.match(html, /刪除料號/);
   assert.match(html, /新增插件位置/);
   assert.match(html, /移除插件位置/);
   assert.match(html, /更換料號/);
+  assert.doesNotMatch(html, /前版|後版|新增元件|移除元件/);
   assert.match(html, /新版完全新料/);
   assert.doesNotMatch(html, /需確認下單/);
   assert.match(html, /新版完全移除/);
@@ -67,6 +66,14 @@ test("ships real BOM parsing, comparison, and export behavior", async () => {
   assert.match(page, /analyzeCompanyBomMatrix/);
   assert.match(page, /book\.SheetNames\.map/);
   assert.match(page, /待人工確認/);
+  assert.match(page, /item\.fields\.includes\(filter\)/);
+  assert.match(page, /matchesFilter && matchesImpact/);
+  assert.match(page, /fieldFilterOptions/);
+  assert.match(page, /componentAdded: "新增"/);
+  assert.match(page, /substituteAdded: "新增"/);
+  assert.match(page, /componentRemoved: "刪除"/);
+  assert.match(page, /substituteRemoved: "刪除"/);
+  assert.match(page, /partReplaced: "變更"/);
   assert.match(page, /showConfidence = item\.matchConfidence === "low"/);
   assert.match(page, /exportBomReport/);
   assert.match(page, /getImageData/);
@@ -109,9 +116,10 @@ test("builds a formatted five-sheet Excel report with audit and review tabs", as
   assert.equal(parsed.Sheets["差異摘要"].A1.v, "BOM 版本差異報告");
   assert.equal(parsed.Sheets["差異明細"].A4.v, "主要異動");
   assert.match(parsed.Sheets["差異明細"].A5.v, /所屬架構：69-ROOT › VB-BOARD-T/);
-  assert.equal(parsed.Sheets["差異明細"].I4.v, "前版製造商名稱");
+  assert.match(parsed.Sheets["差異明細"].A5.v, /^變更/);
+  assert.equal(parsed.Sheets["差異明細"].I4.v, "舊版製造廠商");
   assert.equal(parsed.Sheets["料號生命週期"].A4.v, "生命週期");
-  assert.equal(parsed.Sheets["料號生命週期"].D4.v, "製造商名稱");
+  assert.equal(parsed.Sheets["料號生命週期"].D4.v, "製造廠商");
   assert.equal(parsed.Sheets["待人工確認"].A1.v, "待人工確認清單");
   assert.equal(parsed.Sheets["匯入稽核"].A1.v, "匯入稽核紀錄");
   assert.ok(buffer.byteLength > 10_000);
@@ -138,9 +146,9 @@ test("includes unchanged before and after BOM worksheets in the Excel report", a
 
   const { buildBomReportWithOriginals } = await import("../app/export-report.ts");
   const workbook = await buildBomReportWithOriginals([], "before.xlsx", "after.xlsx", { originalBefore: source, originalAfter: source });
-  assert.deepEqual(workbook.worksheets.map((sheet) => sheet.name), ["差異摘要", "差異明細", "料號生命週期", "待人工確認", "匯入稽核", "前版原始 BOM", "後版原始 BOM"]);
+  assert.deepEqual(workbook.worksheets.map((sheet) => sheet.name), ["差異摘要", "差異明細", "料號生命週期", "待人工確認", "匯入稽核", "舊版原始 BOM", "新版原始 BOM"]);
 
-  const beforeSheet = workbook.getWorksheet("前版原始 BOM");
+  const beforeSheet = workbook.getWorksheet("舊版原始 BOM");
   assert.equal(beforeSheet.getCell("A2").value, "00A");
   assert.equal(beforeSheet.getCell("B2").formula, "1+1");
   assert.equal(beforeSheet.getCell("A1").fill.fgColor.argb, "1F4E78");
@@ -150,12 +158,12 @@ test("includes unchanged before and after BOM worksheets in the Excel report", a
   assert.equal(beforeSheet.getCell("D1").isMerged, true);
   assert.equal(beforeSheet.views[0].state, "frozen");
   assert.equal(beforeSheet.model.conditionalFormattings.length, 1);
-  assert.equal(workbook.getWorksheet("差異摘要").getCell("B4").value.hyperlink, "#'前版原始 BOM'!A1");
+  assert.equal(workbook.getWorksheet("差異摘要").getCell("B4").value.hyperlink, "#'舊版原始 BOM'!A1");
 
   const reportBuffer = await workbook.xlsx.writeBuffer();
   const parsed = XLSX.read(reportBuffer, { type: "buffer" });
-  assert.equal(parsed.Sheets["前版原始 BOM"].A2.v, "00A");
-  assert.equal(parsed.Sheets["後版原始 BOM"].A2.v, "00A");
+  assert.equal(parsed.Sheets["舊版原始 BOM"].A2.v, "00A");
+  assert.equal(parsed.Sheets["新版原始 BOM"].A2.v, "00A");
 });
 
 test("builds a standalone offline HTML report", async () => {
@@ -182,9 +190,13 @@ test("builds a standalone offline HTML report", async () => {
   assert.match(html, /料號生命週期/);
   assert.match(html, /待人工確認/);
   assert.match(html, /匯入稽核/);
-  assert.match(html, /製造商名稱/);
+  assert.match(html, /製造廠商/);
   assert.match(html, /所屬架構/);
   assert.match(html, /69-ROOT › VB-BOARD-T/);
+  assert.match(html, /class="type replacement">變更/);
+  assert.match(html, /舊版 BOM/);
+  assert.match(html, /新版 BOM/);
+  assert.doesNotMatch(html, /前版|後版|新增元件|移除元件/);
   assert.match(html, /Content-Security-Policy/);
   assert.match(html, /OLD&lt;&amp;/);
   assert.doesNotMatch(html, /class="confidence high"|class="confidence medium"/);
@@ -253,6 +265,16 @@ test("centers schematic reference hits and clamps page-edge positions", () => {
   assert.deepEqual(bottomRight, { left: 800, top: 600 });
 });
 
+test("centers from the rendered highlight rectangle after layout and scaling", () => {
+  const centered = centeredRenderedHitScroll(
+    { left: 120, top: 80 },
+    { left: 30, top: 20, width: 500, height: 320 },
+    { left: 610, top: 390, width: 24, height: 16 },
+    { left: 900, top: 700 },
+  );
+  assert.deepEqual(centered, { left: 462, top: 298 });
+});
+
 test("progressively indexes and caches schematic PDFs", async () => {
   const viewer = await readFile(new URL("../app/pdf-schematic-viewer.tsx", import.meta.url), "utf8");
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
@@ -268,6 +290,8 @@ test("progressively indexes and caches schematic PDFs", async () => {
   assert.match(viewer, /syncState\.source === side/);
   assert.match(viewer, /onScaleChange/);
   assert.match(viewer, /centeredPdfHitScroll/);
+  assert.match(viewer, /centeredRenderedHitScroll/);
+  assert.match(viewer, /highlightRef/);
   assert.match(viewer, /currentHit\?\.page === pageNumber/);
   assert.match(viewer, /scheduleCenterCurrentHit/);
   assert.match(viewer, /重新置中/);
@@ -296,6 +320,33 @@ test("maps company columns by header name and groups substitute parts", () => {
   assert.deepEqual(parsed[0].positions, ["U20", "U31"]);
   assert.deepEqual(parsed[0].alternatives.map((part) => part.part), ["123456789012", "INTERNAL-ALT"]);
   assert.deepEqual(parsed[0].alternatives.map((part) => part.manufacturerName), ["Texas Instruments", "Nexperia"]);
+});
+
+test("defaults to the numbered company BOM headers", () => {
+  const header = ["1.項次", "2.主件料號", "5組成用量", "6插件位置", "11製造廠商", "16製造廠商料號"];
+  const mapping = detectCompanyColumns(header);
+  assert.equal(mapping.part, 1);
+  assert.equal(mapping.manufacturerName, 4);
+  assert.equal(mapping.manufacturerPart, 5);
+});
+
+test("defaults to the company field names without numeric prefixes", () => {
+  const header = ["項次", "主件料號", "組成用量", "插件位置", "製造廠商", "製造廠商料號"];
+  const mapping = detectCompanyColumns(header);
+  assert.equal(mapping.part, 1);
+  assert.equal(mapping.manufacturerName, 4);
+  assert.equal(mapping.manufacturerPart, 5);
+});
+
+test("shows explicit manual review and enlarged schematic controls", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.match(page, /人工待審核/);
+  assert.match(page, /reviewDiffs\.length/);
+  assert.match(page, /setImpactFilter\(impactFilter === "review" \? "all" : "review"\)/);
+  assert.match(page, /放大顯示/);
+  assert.match(page, /退出放大/);
+  assert.match(styles, /\.schematic-panel\.expanded/);
 });
 
 test("keeps parsing after columns are inserted, removed, or reordered", () => {
@@ -439,7 +490,7 @@ test("ignores main/substitute ordering but reports added parts and placements", 
 
   const entirelyAdded = compareBom([], changed)[0];
   assert.equal(entirelyAdded.primaryType, "componentAdded");
-  assert.match(entirelyAdded.fields.join(" "), /新增元件/);
+  assert.match(entirelyAdded.fields.join(" "), /新增料號/);
   assert.doesNotMatch(entirelyAdded.fields.join(" "), /新增替料/);
 
   const reverse = compareBom(changed, before)[0];
@@ -470,14 +521,14 @@ test("classifies substitute-only additions and deletions as added or removed", (
   assert.equal(added.kind, "added");
   assert.equal(added.primaryType, "substituteAdded");
   assert.deepEqual(added.categories, ["added"]);
-  assert.deepEqual(added.fields, ["新增替料", "新增料號"]);
+  assert.deepEqual(added.fields, ["新增替料"]);
   assert.deepEqual(added.newParts.map((part) => part.part), ["ALT"]);
 
   const removed = compareBom(withSubstitute, base)[0];
   assert.equal(removed.kind, "removed");
   assert.equal(removed.primaryType, "substituteRemoved");
   assert.deepEqual(removed.categories, ["removed"]);
-  assert.deepEqual(removed.fields, ["刪除替料", "刪除料號"]);
+  assert.deepEqual(removed.fields, ["刪除替料"]);
   assert.deepEqual(removed.deletedParts.map((part) => part.part), ["ALT"]);
 });
 

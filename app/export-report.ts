@@ -27,12 +27,12 @@ const colors = {
 };
 
 const primaryLabels: Record<DiffPrimaryType, string> = {
-  componentAdded: "新增元件",
-  componentRemoved: "移除元件",
-  substituteAdded: "新增替料",
-  substituteRemoved: "刪除替料",
-  partReplaced: "同位置換料",
-  positionChanged: "位置變更",
+  componentAdded: "新增",
+  componentRemoved: "刪除",
+  substituteAdded: "新增",
+  substituteRemoved: "刪除",
+  partReplaced: "變更",
+  positionChanged: "變更",
   same: "相同",
 };
 
@@ -197,9 +197,9 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
   styleTitle(summary, "A1:F2", "BOM 版本差異報告");
   summary.getRow(1).height = 30;
   summary.getRow(2).height = 20;
-  summary.getCell("A4").value = "前版 BOM";
+  summary.getCell("A4").value = "舊版 BOM";
   summary.getCell("B4").value = beforeName;
-  summary.getCell("D4").value = "後版 BOM";
+  summary.getCell("D4").value = "新版 BOM";
   summary.getCell("E4").value = afterName;
   summary.getCell("A5").value = "產生時間";
   summary.getCell("B5").value = new Date();
@@ -253,7 +253,7 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
     row.eachCell({ includeEmpty: true }, (cell) => { cell.border = border(); });
   });
   summary.mergeCells("A22:F24");
-  summary.getCell("A22").value = "判斷說明：料號取最右 12 碼；依 69 → VB-D／60／VB-T／08 PCB 的順序架構分組；項次只切分同一架構內的主替料且不跨版比較；數量優先採用插件位置數，插件位置空白時才採用數量欄；製造商名稱與製造商料號只供顯示，客戶料號暫不使用。";
+  summary.getCell("A22").value = "判斷說明：主件料號取最右 12 碼；依 69 → VB-D／60／VB-T／08 PCB 的順序架構分組；項次只切分同一架構內的主替料且不跨版比較；數量優先採用插件位置數，插件位置空白時才採用數量欄；製造廠商與製造廠商料號只供顯示，客戶料號暫不使用。";
   summary.getCell("A22").alignment = { vertical: "top", wrapText: true };
   summary.getCell("A22").font = { name: "Microsoft JhengHei", size: 10, color: { argb: colors.gray } };
   summary.getCell("A22").fill = fill(colors.paleGray);
@@ -263,10 +263,10 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
 
   const details = workbook.addWorksheet("差異明細", { properties: { defaultRowHeight: 28 } });
   const detailHeaders = [
-    "主要異動", "影響標籤", "新版完全新料", "新版完全移除", "前版料號", "後版料號",
-    "前版製造商料號", "後版製造商料號", "前版製造商名稱", "後版製造商名稱", "新增料號", "刪除料號",
-    "新增插件位置", "移除插件位置", "同位置換料", "前版數量", "後版數量", "前版項次（追溯）", "後版項次（追溯）",
-    "配對可信度", "配對依據", "待人工確認", "前版原始列", "後版原始列",
+    "主要異動", "影響標籤", "新版完全新料", "新版完全移除", "舊版料號", "新版料號",
+    "舊版製造廠商料號", "新版製造廠商料號", "舊版製造廠商", "新版製造廠商", "新增料號", "刪除料號",
+    "新增插件位置", "移除插件位置", "同位置換料", "舊版數量", "新版數量", "舊版項次（追溯）", "新版項次（追溯）",
+    "配對可信度", "配對依據", "待人工確認", "舊版原始列", "新版原始列",
   ];
   styleTitle(details, `A1:X1`, "BOM 差異明細");
   details.mergeCells("A2:X2");
@@ -311,10 +311,10 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
   const lifecycle = workbook.addWorksheet("料號生命週期", { properties: { defaultRowHeight: 25 } });
   styleTitle(lifecycle, "A1:H1", "料號生命週期清單");
   lifecycle.mergeCells("A2:H2");
-  lifecycle.getCell("A2").value = "集中列出新版完全新料與新版完全移除料號；製造商料號與製造商名稱只供識別，不參與差異判斷。";
+  lifecycle.getCell("A2").value = "集中列出新版完全新料與新版完全移除料號；製造廠商料號與製造廠商只供識別，不參與差異判斷。";
   lifecycle.getCell("A2").font = { name: "Microsoft JhengHei", size: 10, color: { argb: colors.gray } };
   const lifecycleHeader = lifecycle.getRow(4);
-  lifecycleHeader.values = ["生命週期", "料號", "製造商料號", "製造商名稱", "插件位置", "數量", "主要異動", "項次（追溯）"];
+  lifecycleHeader.values = ["生命週期", "主件料號", "製造廠商料號", "製造廠商", "插件位置", "數量", "主要異動", "項次（追溯）"];
   styleHeader(lifecycleHeader);
   const lifecycleRows: Array<[string, BomAlternative, string, number, string, string]> = [];
   diffs.forEach((diff) => {
@@ -346,7 +346,7 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
   review.getCell("A2").value = "列出配對可信度偏低或存在多個合理配對候選的群組，請回到原始 BOM 人工確認。";
   review.getCell("A2").font = { name: "Microsoft JhengHei", size: 10, color: { argb: colors.gray } };
   const reviewHeader = review.getRow(4);
-  reviewHeader.values = ["主要異動", "前版料號", "新版料號", "插件位置", "可信度", "配對依據", "前版原始列", "新版原始列"];
+  reviewHeader.values = ["主要異動", "舊版料號", "新版料號", "插件位置", "可信度", "配對依據", "舊版原始列", "新版原始列"];
   styleHeader(reviewHeader);
   diffs.filter((diff) => diff.needsReview).forEach((diff, index) => {
     const row = review.getRow(5 + index);
@@ -364,7 +364,7 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
   auditHeader.values = ["版本", "檔案", "工作表", "項目", "內容", "原始列"];
   styleHeader(auditHeader);
   const auditRows: Array<[string, string, string, string, string, string]> = [];
-  ([{ label: "前版", source: context.before }, { label: "後版", source: context.after }] as const).forEach(({ label, source }) => {
+  ([{ label: "舊版", source: context.before }, { label: "新版", source: context.after }] as const).forEach(({ label, source }) => {
     if (!source) return;
     auditRows.push([label, source.fileName, source.sheetName, "標題列", String(source.audit.headerRow), ""]);
     (Object.entries(source.audit.mappingLabels) as Array<[CompanyColumnKey, string]>).forEach(([key, value]) => auditRows.push([label, source.fileName, source.sheetName, `欄位對應：${companyColumnLabels[key]}`, value, ""]));
@@ -385,12 +385,12 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
 export async function buildBomReportWithOriginals(diffs: BomDiff[], beforeName: string, afterName: string, context: ReportContext = {}) {
   const workbook = buildBomReport(diffs, beforeName, afterName, context);
   if (context.originalBefore) {
-    await appendOriginalBom(workbook, context.originalBefore, "前版原始 BOM");
-    workbook.getWorksheet("差異摘要")!.getCell("B4").value = { text: beforeName, hyperlink: "#'前版原始 BOM'!A1" };
+    await appendOriginalBom(workbook, context.originalBefore, "舊版原始 BOM");
+    workbook.getWorksheet("差異摘要")!.getCell("B4").value = { text: beforeName, hyperlink: "#'舊版原始 BOM'!A1" };
   }
   if (context.originalAfter) {
-    await appendOriginalBom(workbook, context.originalAfter, "後版原始 BOM");
-    workbook.getWorksheet("差異摘要")!.getCell("E4").value = { text: afterName, hyperlink: "#'後版原始 BOM'!A1" };
+    await appendOriginalBom(workbook, context.originalAfter, "新版原始 BOM");
+    workbook.getWorksheet("差異摘要")!.getCell("E4").value = { text: afterName, hyperlink: "#'新版原始 BOM'!A1" };
   }
   return workbook;
 }
