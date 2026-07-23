@@ -449,7 +449,6 @@ export function compareBom(before: BomItem[], after: BomItem[]): BomDiff[] {
 
     let fields = compactFields(addedParts, removedParts, addedPositions, removedPositions, true, true);
     const quantityChanged = a.qty !== b.qty;
-    if (quantityChanged) fields.push("數量差異");
     if (replacementPositions.length) {
       fields = fields.filter((field) => field !== "新增替料" && field !== "刪除替料");
       fields.push("更換料號");

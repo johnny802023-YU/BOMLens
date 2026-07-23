@@ -66,7 +66,9 @@ test("ships real BOM parsing, comparison, and export behavior", async () => {
   assert.match(page, /analyzeCompanyBomMatrix/);
   assert.match(page, /book\.SheetNames\.map/);
   assert.match(page, /待人工確認/);
-  assert.match(page, /item\.fields\.includes\(filter\)/);
+  assert.match(page, /selectedFields\.some\(\(field\) => item\.fields\.includes\(field\)\)/);
+  assert.match(page, /影響標籤（可複選）/);
+  assert.doesNotMatch(page, /"數量差異"/);
   assert.match(page, /matchesFilter && matchesImpact/);
   assert.match(page, /fieldFilterOptions/);
   assert.match(page, /componentAdded: "新增"/);
@@ -76,6 +78,8 @@ test("ships real BOM parsing, comparison, and export behavior", async () => {
   assert.match(page, /partReplaced: "變更"/);
   assert.match(page, /showConfidence = item\.matchConfidence === "low"/);
   assert.match(page, /exportBomReport/);
+  assert.match(page, /exportBomReport\(visible/);
+  assert.match(page, /exportBomHtmlReport\(visible/);
   assert.match(page, /getImageData/);
   assert.match(page, /application\/pdf/);
   assert.match(layout, /lang="zh-Hant"/);
@@ -86,7 +90,7 @@ test("ships real BOM parsing, comparison, and export behavior", async () => {
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 });
 
-test("builds a formatted five-sheet Excel report with audit and review tabs", async () => {
+test("builds a concise formatted Excel difference report", async () => {
   const item = (part, position) => ({
     ref: position,
     part,
@@ -100,29 +104,38 @@ test("builds a formatted five-sheet Excel report with audit and review tabs", as
     structurePath: ["69-ROOT", "VB-BOARD-T"],
     structureKey: "1:vb-t:1",
   });
-  const diffs = compareBom([item("OLD-PART", "U20")], [item("NEW-PART", "U20")]);
+  const replacementDiffs = compareBom([item("OLD-PART", "U20")], [item("NEW-PART", "U20")]);
+  const quantityBefore = { ...item("SAME-PART", "U30"), structureKey: "1:vb-t:2" };
+  const quantityAfter = { ...item("SAME-PART", "U30"), structureKey: "1:vb-t:2", qty: 2, positions: ["U30", "U31"] };
+  const diffs = [...replacementDiffs, ...compareBom([quantityBefore], [quantityAfter])];
   const { buildBomReport } = await import("../app/export-report.ts");
   const workbook = buildBomReport(diffs, "before.xlsx", "after.xlsx");
-  const detailSheet = workbook.getWorksheet("差異明細");
+  const detailSheet = workbook.getWorksheet("差異清單");
   assert.equal(detailSheet.views[0].state, "frozen");
   assert.equal(detailSheet.views[0].ySplit, 4);
-  assert.deepEqual(detailSheet.autoFilter, { from: "A4", to: "X4" });
+  assert.deepEqual(detailSheet.autoFilter, { from: "A4", to: "M4" });
   assert.equal(detailSheet.getCell("A4").fill.fgColor.argb, "2F6BCE");
   assert.ok(detailSheet.getColumn(2).width >= 20);
   const buffer = await workbook.xlsx.writeBuffer();
   const parsed = XLSX.read(buffer, { type: "buffer" });
 
-  assert.deepEqual(parsed.SheetNames, ["差異摘要", "差異明細", "料號生命週期", "待人工確認", "匯入稽核"]);
-  assert.equal(parsed.Sheets["差異摘要"].A1.v, "BOM 版本差異報告");
-  assert.equal(parsed.Sheets["差異明細"].A4.v, "主要異動");
-  assert.match(parsed.Sheets["差異明細"].A5.v, /所屬架構：69-ROOT › VB-BOARD-T/);
-  assert.match(parsed.Sheets["差異明細"].A5.v, /^變更/);
-  assert.equal(parsed.Sheets["差異明細"].I4.v, "舊版製造廠商");
-  assert.equal(parsed.Sheets["料號生命週期"].A4.v, "生命週期");
-  assert.equal(parsed.Sheets["料號生命週期"].D4.v, "製造廠商");
-  assert.equal(parsed.Sheets["待人工確認"].A1.v, "待人工確認清單");
-  assert.equal(parsed.Sheets["匯入稽核"].A1.v, "匯入稽核紀錄");
-  assert.ok(buffer.byteLength > 10_000);
+  assert.deepEqual(parsed.SheetNames, ["差異清單"]);
+  assert.equal(parsed.Sheets["差異清單"].A1.v, "BOM 差異明細");
+  assert.equal(parsed.Sheets["差異清單"].A4.v, "主要異動");
+  assert.equal(parsed.Sheets["差異清單"].B4.v, "影響標籤");
+  assert.equal(parsed.Sheets["差異清單"].E4.v, "舊版主件料號");
+  assert.equal(parsed.Sheets["差異清單"].F4.v, "舊版製造廠商料號");
+  assert.equal(parsed.Sheets["差異清單"].G4.v, "舊版製造廠商");
+  assert.equal(parsed.Sheets["差異清單"].H4.v, "新版主件料號");
+  assert.equal(parsed.Sheets["差異清單"].I4.v, "新版製造廠商料號");
+  assert.equal(parsed.Sheets["差異清單"].J4.v, "新版製造廠商");
+  assert.equal(parsed.Sheets["差異清單"].K4.v, "舊版數量");
+  assert.equal(parsed.Sheets["差異清單"].L4.v, "新版數量");
+  assert.equal(parsed.Sheets["差異清單"].M4.v, "數量變化");
+  assert.equal(parsed.Sheets["差異清單"].D5.v, "U20 換料");
+  assert.equal(parsed.Sheets["差異清單"].M5.v, "Same");
+  assert.equal(parsed.Sheets["差異清單"].M6.v, "Increase");
+  assert.ok(buffer.byteLength > 5_000);
 });
 
 test("includes unchanged before and after BOM worksheets in the Excel report", async () => {
@@ -146,7 +159,7 @@ test("includes unchanged before and after BOM worksheets in the Excel report", a
 
   const { buildBomReportWithOriginals } = await import("../app/export-report.ts");
   const workbook = await buildBomReportWithOriginals([], "before.xlsx", "after.xlsx", { originalBefore: source, originalAfter: source });
-  assert.deepEqual(workbook.worksheets.map((sheet) => sheet.name), ["差異摘要", "差異明細", "料號生命週期", "待人工確認", "匯入稽核", "舊版原始 BOM", "新版原始 BOM"]);
+  assert.deepEqual(workbook.worksheets.map((sheet) => sheet.name), ["差異清單", "舊版原始 BOM", "新版原始 BOM"]);
 
   const beforeSheet = workbook.getWorksheet("舊版原始 BOM");
   assert.equal(beforeSheet.getCell("A2").value, "00A");
@@ -158,7 +171,7 @@ test("includes unchanged before and after BOM worksheets in the Excel report", a
   assert.equal(beforeSheet.getCell("D1").isMerged, true);
   assert.equal(beforeSheet.views[0].state, "frozen");
   assert.equal(beforeSheet.model.conditionalFormattings.length, 1);
-  assert.equal(workbook.getWorksheet("差異摘要").getCell("B4").value.hyperlink, "#'舊版原始 BOM'!A1");
+  assert.equal(workbook.getWorksheet("差異清單").getCell("B2").value.hyperlink, "#'舊版原始 BOM'!A1");
 
   const reportBuffer = await workbook.xlsx.writeBuffer();
   const parsed = XLSX.read(reportBuffer, { type: "buffer" });
@@ -187,9 +200,8 @@ test("builds a standalone offline HTML report", async () => {
   assert.match(html, /^<!doctype html>/);
   assert.match(html, /BOM 版本差異報告/);
   assert.match(html, /差異明細/);
-  assert.match(html, /料號生命週期/);
-  assert.match(html, /待人工確認/);
-  assert.match(html, /匯入稽核/);
+  assert.match(html, /新版新料／移除清單/);
+  assert.doesNotMatch(html, /<h2>待人工確認<\/h2>|<h2>匯入警告<\/h2>/);
   assert.match(html, /製造廠商/);
   assert.match(html, /所屬架構/);
   assert.match(html, /69-ROOT › VB-BOARD-T/);
@@ -484,7 +496,7 @@ test("ignores main/substitute ordering but reports added parts and placements", 
   assert.deepEqual(diff.addedPositions, ["U3"]);
   assert.match(diff.fields.join(" "), /新增替料/);
   assert.match(diff.fields.join(" "), /新增插件位置/);
-  assert.match(diff.fields.join(" "), /數量差異/);
+  assert.doesNotMatch(diff.fields.join(" "), /數量差異/);
   assert.deepEqual(diff.categories, ["added", "changed"]);
   assert.equal(diff.after?.qty, 3);
 

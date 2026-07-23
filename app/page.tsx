@@ -47,7 +47,7 @@ import {
   type ImportAudit,
 } from "./bom-logic";
 
-type FieldFilter = "all" | "新增料號" | "新增替料" | "新增插件位置" | "刪除料號" | "刪除替料" | "移除插件位置" | "更換料號" | "數量差異";
+type FieldFilter = "新增料號" | "新增替料" | "新增插件位置" | "刪除料號" | "刪除替料" | "移除插件位置" | "更換料號";
 type ImpactFilter = "all" | "purchase" | "deleted" | "review";
 
 type ImportSheet = { name: string; matrix: unknown[][] };
@@ -63,7 +63,6 @@ type PendingImport = {
 type ImportRecord = { fileName: string; sheetName: string; importedAt: string; audit: ImportAudit };
 
 const fieldFilterOptions: Array<{ key: FieldFilter; label: string }> = [
-  { key: "all", label: "全部" },
   { key: "新增料號", label: "新增料號" },
   { key: "新增替料", label: "新增替料" },
   { key: "新增插件位置", label: "新增插件位置" },
@@ -71,7 +70,6 @@ const fieldFilterOptions: Array<{ key: FieldFilter; label: string }> = [
   { key: "刪除替料", label: "刪除替料" },
   { key: "移除插件位置", label: "移除插件位置" },
   { key: "更換料號", label: "更換料號" },
-  { key: "數量差異", label: "數量差異" },
 ];
 
 const primaryTypeLabels: Record<DiffPrimaryType, string> = {
@@ -154,7 +152,7 @@ export default function Home() {
   const [beforeName, setBeforeName] = useState("PCB_Main_v1.3.xlsx");
   const [afterName, setAfterName] = useState("PCB_Main_v1.4.xlsx");
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<FieldFilter>("all");
+  const [selectedFields, setSelectedFields] = useState<FieldFilter[]>([]);
   const [impactFilter, setImpactFilter] = useState<ImpactFilter>("all");
   const [sheetBefore, setSheetBefore] = useState<string | null>(null);
   const [sheetAfter, setSheetAfter] = useState<string | null>(null);
@@ -192,14 +190,20 @@ export default function Home() {
   const matchingDiffs = changedDiffs.filter((item) => {
     const manufacturerNames = [...(item.before?.alternatives ?? []), ...(item.after?.alternatives ?? [])].map((part) => part.manufacturerName ?? "").join(" ");
     const text = `${item.ref} ${diffStructureLabel(item)} ${displayPart(item.before)} ${displayPart(item.after)} ${item.before?.manufacturerPart ?? ""} ${item.after?.manufacturerPart ?? ""} ${manufacturerNames} ${item.fields.join(" ")} ${item.addedPositions.join(" ")} ${item.removedPositions.join(" ")}`.toLowerCase();
-    const matchesFilter = filter === "all" || item.fields.includes(filter);
+    const matchesFilter = selectedFields.length === 0 || selectedFields.some((field) => item.fields.includes(field));
     const matchesImpact = impactFilter === "all"
       || (impactFilter === "purchase" && item.newParts.length > 0)
       || (impactFilter === "deleted" && item.deletedParts.length > 0)
       || (impactFilter === "review" && item.needsReview);
     return matchesFilter && matchesImpact && text.includes(query.toLowerCase());
   });
-  const visible = filter === "all" ? sortBomDiffsForAll(matchingDiffs) : matchingDiffs;
+  const visible = sortBomDiffsForAll(matchingDiffs);
+
+  function toggleFieldFilter(field: FieldFilter) {
+    setSelectedFields((current) => current.includes(field)
+      ? current.filter((selected) => selected !== field)
+      : [...current, field]);
+  }
 
   async function loadBom(file: File, side: "before" | "after") {
     const data = await file.arrayBuffer();
@@ -320,7 +324,7 @@ export default function Home() {
   async function exportCsv() {
     try {
       const { exportBomReport } = await import("./export-report");
-      await exportBomReport(changedDiffs, beforeName, afterName, { before: beforeAudit, after: afterAudit, originalBefore, originalAfter });
+      await exportBomReport(visible, beforeName, afterName, { before: beforeAudit, after: afterAudit, originalBefore, originalAfter });
     } catch {
       window.alert("報表產生失敗，請重新整理後再試一次。");
     }
@@ -329,7 +333,7 @@ export default function Home() {
   async function exportHtml() {
     try {
       const { exportBomHtmlReport } = await import("./export-html-report");
-      exportBomHtmlReport(changedDiffs, beforeName, afterName, { before: beforeAudit, after: afterAudit });
+      exportBomHtmlReport(visible, beforeName, afterName, { before: beforeAudit, after: afterAudit });
     } catch {
       window.alert("HTML 報告產生失敗，請重新整理後再試一次。");
     }
@@ -356,7 +360,7 @@ export default function Home() {
         <header className="topbar">
           <button className="mobile-menu" onClick={() => setMobileNav(true)} aria-label="開啟選單"><Menu /></button>
           <div><div className="breadcrumb">本機工具 <span>/</span> BOM 版本比對</div><h1>版本比對 <span className="version-pill">{beforeName || "舊版"} → {afterName || "新版"}</span></h1></div>
-          <div className="top-actions"><span className="saved offline"><ShieldCheck size={14} /> 本機離線</span><button className="secondary" onClick={exportHtml}><FileText size={17} /> 匯出 HTML</button><button className="primary" onClick={exportCsv}><Download size={17} /> 匯出差異</button></div>
+          <div className="top-actions"><span className="saved offline"><ShieldCheck size={14} /> 本機離線</span><button className="secondary" onClick={exportHtml} title="依目前搜尋與篩選結果匯出"><FileText size={17} /> 匯出 HTML</button><button className="primary" onClick={exportCsv} title="依目前搜尋與篩選結果匯出"><Download size={17} /> 匯出差異</button></div>
         </header>
 
         <div className="content">
@@ -392,7 +396,7 @@ export default function Home() {
               <div className="table-tools">
                 <label className="search"><Search size={17} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜尋主件料號、製造廠商或插件位置" /></label>
                 <div className="filter-panel">
-                  <div className="filters primary-filters"><span className="filter-title"><Filter size={14} />影響標籤</span>{fieldFilterOptions.map((option) => <button key={option.key} onClick={() => setFilter(option.key)} className={filter === option.key ? "active" : ""}>{option.label}</button>)}</div>
+                  <div className="filters primary-filters"><span className="filter-title"><Filter size={14} />影響標籤（可複選）</span><button onClick={() => setSelectedFields([])} className={selectedFields.length === 0 ? "active" : ""}>全部</button>{fieldFilterOptions.map((option) => <button key={option.key} onClick={() => toggleFieldFilter(option.key)} className={selectedFields.includes(option.key) ? "active" : ""} aria-pressed={selectedFields.includes(option.key)}>{option.label}</button>)}</div>
                   <div className="filters impact-filters"><span className="filter-title">影響條件</span>{([{ key: "all", label: "不限" }, { key: "purchase", label: "新版完全新料" }, { key: "deleted", label: "新版完全移除" }, { key: "review", label: "待人工確認" }] as const).map((option) => <button key={option.key} onClick={() => setImpactFilter(option.key)} className={impactFilter === option.key ? "active" : ""}>{option.label}</button>)}</div>
                 </div>
               </div>
@@ -486,8 +490,7 @@ function ChangeFields({ fields }: { fields: string[] }) {
       : field === "刪除替料" || field === "刪除料號" ? "removed"
         : field === "新增插件位置" ? "position"
           : field === "移除插件位置" ? "removed-position"
-            : field === "數量差異" ? "quantity"
-              : field === "更換料號" ? "replacement"
+            : field === "更換料號" ? "replacement"
                 : "manufacturer";
     return <span className={`change-pill ${tone}`} key={field}>{field}</span>;
   })}</div>;
