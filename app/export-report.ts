@@ -1,5 +1,5 @@
 import ExcelJS from "exceljs";
-import { type BomAlternative, type BomDiff, type ImportAudit } from "./bom-logic.ts";
+import { bomDiffDisplayFields, type BomAlternative, type BomDiff, type ImportAudit } from "./bom-logic.ts";
 
 export type ReportSource = { fileName: string; sheetName: string; importedAt: string; audit: ImportAudit };
 export type OriginalBomSource = { fileName: string; sheetName: string; data: ArrayBuffer; matrix: unknown[][] };
@@ -22,11 +22,15 @@ const colors = {
   paleAmber: "FFF3DC",
   gray: "667085",
   paleGray: "F4F6F8",
+  oldVersion: "58677C",
+  paleOldVersion: "F2F4F7",
+  newVersion: "2F6BCE",
+  paleNewVersion: "EDF4FF",
   white: "FFFFFF",
   border: "D9E0E8",
 };
 
-const exportCategoryOrder = ["新版完全新料", "新增替代", "新版完全移除", "刪除替代", "數量差異"] as const;
+const exportCategoryOrder = ["新版完全新料", "新增替代", "新版完全移除", "刪除替代", "數量差異", "製程別放置異常"] as const;
 type ExportCategory = (typeof exportCategoryOrder)[number];
 const exportSectionOrder = [...exportCategoryOrder, "僅插件位置差異"] as const;
 type ExportSection = (typeof exportSectionOrder)[number];
@@ -38,26 +42,28 @@ const detailHeaders = [
 ] as const;
 const dataHeaders = ["分類", ...detailHeaders] as const;
 const summaryColumnGroups = [
-  { label: "異動", start: 1, end: 2 },
-  { label: "差異內容", start: 3, end: 4 },
-  { label: "插件位置", start: 5, end: 6 },
-  { label: "舊版料號資訊", start: 7, end: 9 },
-  { label: "→", start: 10, end: 10 },
-  { label: "新版料號資訊", start: 11, end: 13 },
-  { label: "數量", start: 14, end: 15 },
+  { label: "主要異動", start: 1, end: 2 },
+  { label: "差異項目", start: 3, end: 4 },
+  { label: "料號異動", start: 5, end: 6 },
+  { label: "插件位置差異", start: 7, end: 8 },
+  { label: "舊版料號資訊", start: 9, end: 11, tone: "old" },
+  { label: "→", start: 12, end: 12 },
+  { label: "新版料號資訊", start: 13, end: 15, tone: "new" },
+  { label: "數量", start: 16, end: 17 },
 ] as const;
 const summarySubHeaders = [
-  { label: "異動類型", start: 1, end: 2 },
-  { label: "異動摘要", start: 3, end: 4 },
-  { label: "插件位置", start: 5, end: 6 },
-  { label: "舊版料號", start: 7, end: 7 },
-  { label: "舊版製造商料號", start: 8, end: 8 },
-  { label: "舊版製造商", start: 9, end: 9 },
-  { label: "→", start: 10, end: 10 },
-  { label: "新版料號", start: 11, end: 11 },
-  { label: "新版製造商料號", start: 12, end: 12 },
-  { label: "新版製造商", start: 13, end: 13 },
-  { label: "舊版 → 新版", start: 14, end: 15 },
+  { label: "新增／刪除／變更", start: 1, end: 2 },
+  { label: "差異標籤", start: 3, end: 4 },
+  { label: "料號新增／刪除", start: 5, end: 6 },
+  { label: "插件位置", start: 7, end: 8 },
+  { label: "舊版料號", start: 9, end: 9, tone: "old" },
+  { label: "舊版製造商料號", start: 10, end: 10, tone: "old" },
+  { label: "舊版製造商", start: 11, end: 11, tone: "old" },
+  { label: "→", start: 12, end: 12 },
+  { label: "新版料號", start: 13, end: 13, tone: "new" },
+  { label: "新版製造商料號", start: 14, end: 14, tone: "new" },
+  { label: "新版製造商", start: 15, end: 15, tone: "new" },
+  { label: "舊版 → 新版", start: 16, end: 17 },
 ] as const;
 
 function partLabel(part: BomAlternative) {
@@ -92,6 +98,7 @@ export function exportCategories(diff: BomDiff): ExportCategory[] {
   }
   if (diff.primaryType === "substituteAdded") categories.push("新增替代");
   if (diff.primaryType === "substituteRemoved") categories.push("刪除替代");
+  if (diff.processChange) categories.push("製程別放置異常");
   if (diff.before && diff.after && diff.before.qty !== diff.after.qty) categories.push("數量差異");
   return categories;
 }
@@ -170,11 +177,14 @@ function sectionTone(section: ExportSection) {
   if (section === "數量差異") {
     return { foreground: colors.amber, background: colors.paleAmber };
   }
+  if (section === "製程別放置異常") {
+    return { foreground: colors.amber, background: colors.paleAmber };
+  }
   return { foreground: colors.blue, background: colors.paleBlue };
 }
 
 function styleSummarySectionTitle(sheet: ExcelJS.Worksheet, rowNumber: number, section: ExportSection, count: number) {
-  sheet.mergeCells(rowNumber, 1, rowNumber, 15);
+  sheet.mergeCells(rowNumber, 1, rowNumber, 17);
   const row = sheet.getRow(rowNumber);
   row.height = 24;
   const cell = row.getCell(1);
@@ -193,7 +203,7 @@ function detailRowValues(diff: BomDiff): ExcelJS.CellValue[] {
   const afterQty = diff.after?.qty ?? 0;
   const quantityTrend = afterQty > beforeQty ? "Increase" : afterQty < beforeQty ? "Decrease" : "Same";
   return [
-    primaryLabel(diff), diff.fields.join("\n"), partChanges(diff), positionChanges(diff),
+    primaryLabel(diff), bomDiffDisplayFields(diff).join("\n"), partChanges(diff), positionChanges(diff),
     listPartNumbers(beforeParts), listManufacturerParts(beforeParts), listManufacturers(beforeParts),
     listPartNumbers(afterParts), listManufacturerParts(afterParts), listManufacturers(afterParts),
     beforeQty, afterQty, quantityTrend,
@@ -228,6 +238,8 @@ function styleDataRow(row: ExcelJS.Row, diff: BomDiff, striped: boolean) {
       : { font: colors.blue, fill: colors.paleBlue };
   typeCell.font = { name: "Microsoft JhengHei", size: 10, bold: true, color: { argb: tone.font } };
   typeCell.fill = fill(tone.fill);
+  [6, 7, 8, 12].forEach((column) => { row.getCell(column).fill = fill(colors.paleOldVersion); });
+  [9, 10, 11, 13].forEach((column) => { row.getCell(column).fill = fill(colors.paleNewVersion); });
   row.getCell(12).numFmt = "#,##0";
   row.getCell(13).numFmt = "#,##0";
   const trendCell = row.getCell(14);
@@ -240,19 +252,10 @@ function styleDataRow(row: ExcelJS.Row, diff: BomDiff, striped: boolean) {
   trendCell.fill = fill(quantityTrend === "Increase" ? colors.paleGreen : quantityTrend === "Decrease" ? colors.paleRed : colors.paleGray);
 }
 
-function summaryTypeLabel(section: ExportSection) {
-  if (section === "新版完全新料") return "新增料號";
-  if (section === "新增替代") return "新增替代";
-  if (section === "新版完全移除") return "刪除料號";
-  if (section === "刪除替代") return "刪除替代";
-  if (section === "數量差異") return "數量變更";
-  return "位置變更";
-}
-
 function styleSummaryHeaderRow(
   sheet: ExcelJS.Worksheet,
   rowNumber: number,
-  headers: ReadonlyArray<{ label: string; start: number; end: number }>,
+  headers: ReadonlyArray<{ label: string; start: number; end: number; tone?: "old" | "new" }>,
   color: string,
 ) {
   headers.forEach((group) => {
@@ -260,7 +263,8 @@ function styleSummaryHeaderRow(
     const cell = sheet.getRow(rowNumber).getCell(group.start);
     cell.value = group.label;
     cell.font = { name: "Microsoft JhengHei", size: 10, bold: true, color: { argb: colors.white } };
-    cell.fill = fill(color);
+    const groupColor = group.tone === "old" ? colors.oldVersion : group.tone === "new" ? colors.newVersion : color;
+    cell.fill = fill(groupColor);
     cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
     cell.border = border();
   });
@@ -281,10 +285,10 @@ function writeSummaryDiffRows(
   for (let rowNumber = startRow; rowNumber <= endRow; rowNumber += 1) {
     const row = sheet.getRow(rowNumber);
     row.height = 34;
-    for (let column = 1; column <= 15; column += 1) {
+    for (let column = 1; column <= 17; column += 1) {
       const cell = row.getCell(column);
       cell.font = { name: "Microsoft JhengHei", size: 10, color: { argb: "344054" } };
-      cell.alignment = { vertical: "middle", horizontal: column === 10 || column >= 14 ? "center" : "left", wrapText: true };
+      cell.alignment = { vertical: "middle", horizontal: column === 12 || column >= 16 ? "center" : "left", wrapText: true };
       cell.border = border();
       if (striped) cell.fill = fill("FAFBFC");
     }
@@ -294,40 +298,44 @@ function writeSummaryDiffRows(
     { start: 1, end: 2 },
     { start: 3, end: 4 },
     { start: 5, end: 6 },
-    { start: 10, end: 10 },
-    { start: 14, end: 15 },
+    { start: 7, end: 8 },
+    { start: 12, end: 12 },
+    { start: 16, end: 17 },
   ].forEach((group) => sheet.mergeCells(startRow, group.start, endRow, group.end));
 
   const row = sheet.getRow(startRow);
-  row.getCell(1).value = summaryTypeLabel(section);
-  row.getCell(3).value = diff.fields.join("\n") || primaryLabel(diff);
-  row.getCell(5).value = positionChanges(diff) || "—";
-  row.getCell(10).value = "→";
+  row.getCell(1).value = primaryLabel(diff);
+  row.getCell(3).value = bomDiffDisplayFields(diff).join("\n") || primaryLabel(diff);
+  row.getCell(5).value = partChanges(diff) || "料號無增減";
+  row.getCell(7).value = positionChanges(diff) || "—";
+  row.getCell(12).value = "→";
   const beforeQty = diff.before?.qty ?? 0;
   const afterQty = diff.after?.qty ?? 0;
-  row.getCell(14).value = `${beforeQty} → ${afterQty}`;
+  row.getCell(16).value = `${beforeQty} → ${afterQty}`;
 
   for (let index = 0; index < partRowCount; index += 1) {
     const partRow = sheet.getRow(startRow + index);
     const beforePart = beforeParts[index];
     const afterPart = afterParts[index];
-    partRow.getCell(7).value = beforePart ? partLabel(beforePart) : index === 0 ? "—" : "";
-    partRow.getCell(8).value = beforePart?.manufacturerPart ?? "";
-    partRow.getCell(9).value = beforePart?.manufacturerName ?? "";
-    partRow.getCell(11).value = afterPart ? partLabel(afterPart) : index === 0 ? "—" : "";
-    partRow.getCell(12).value = afterPart?.manufacturerPart ?? "";
-    partRow.getCell(13).value = afterPart?.manufacturerName ?? "";
-    partRow.getCell(7).font = { name: "Microsoft JhengHei", size: 10, bold: index === 0, color: { argb: "344054" } };
-    partRow.getCell(11).font = { name: "Microsoft JhengHei", size: 10, bold: index === 0, color: { argb: "344054" } };
+    partRow.getCell(9).value = beforePart ? partLabel(beforePart) : index === 0 ? "—" : "";
+    partRow.getCell(10).value = beforePart?.manufacturerPart ?? "";
+    partRow.getCell(11).value = beforePart?.manufacturerName ?? "";
+    partRow.getCell(13).value = afterPart ? partLabel(afterPart) : index === 0 ? "—" : "";
+    partRow.getCell(14).value = afterPart?.manufacturerPart ?? "";
+    partRow.getCell(15).value = afterPart?.manufacturerName ?? "";
+    [9, 10, 11].forEach((column) => { partRow.getCell(column).fill = fill(colors.paleOldVersion); });
+    [13, 14, 15].forEach((column) => { partRow.getCell(column).fill = fill(colors.paleNewVersion); });
+    partRow.getCell(9).font = { name: "Microsoft JhengHei", size: 10, bold: index === 0, color: { argb: "344054" } };
+    partRow.getCell(13).font = { name: "Microsoft JhengHei", size: 10, bold: index === 0, color: { argb: "344054" } };
   }
 
   const tone = sectionTone(section);
   const typeCell = row.getCell(1);
   typeCell.font = { name: "Microsoft JhengHei", size: 10, bold: true, color: { argb: tone.foreground } };
   typeCell.fill = fill(tone.background);
-  const arrowCell = row.getCell(10);
+  const arrowCell = row.getCell(12);
   arrowCell.font = { name: "Microsoft JhengHei", size: 16, bold: true, color: { argb: tone.foreground } };
-  const quantityCell = row.getCell(14);
+  const quantityCell = row.getCell(16);
   quantityCell.font = {
     name: "Microsoft JhengHei",
     size: 11,
@@ -434,21 +442,23 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
   workbook.subject = `${beforeName} → ${afterName}`;
 
   const summarySheet = workbook.addWorksheet("差異摘要", { properties: { defaultRowHeight: 26 } });
-  styleTitle(summarySheet, "A1:O1", "BOM 差異比較報告");
+  styleTitle(summarySheet, "A1:Q1", "BOM 差異比較報告");
   summarySheet.getRow(1).height = 36;
   summarySheet.mergeCells("A2:B2");
-  summarySheet.mergeCells("C2:G2");
-  summarySheet.mergeCells("H2:I2");
-  summarySheet.mergeCells("J2:O2");
+  summarySheet.mergeCells("C2:H2");
+  summarySheet.mergeCells("I2:J2");
+  summarySheet.mergeCells("K2:Q2");
   summarySheet.getCell("A2").value = "舊版 BOM";
   summarySheet.getCell("C2").value = beforeName;
-  summarySheet.getCell("H2").value = "新版 BOM";
-  summarySheet.getCell("J2").value = afterName;
-  ["A2", "H2"].forEach((address) => {
+  summarySheet.getCell("I2").value = "新版 BOM";
+  summarySheet.getCell("K2").value = afterName;
+  ["A2", "I2"].forEach((address) => {
     summarySheet.getCell(address).font = { name: "Microsoft JhengHei", bold: true, color: { argb: colors.gray } };
   });
+  for (let column = 1; column <= 8; column += 1) summarySheet.getCell(2, column).fill = fill(colors.paleOldVersion);
+  for (let column = 9; column <= 17; column += 1) summarySheet.getCell(2, column).fill = fill(colors.paleNewVersion);
 
-  const cardRanges = ["A4:B5", "C4:E5", "F4:H5", "I4:K5", "L4:M5", "N4:O5"];
+  const cardRanges = ["A4:B5", "C4:D5", "E4:F5", "G4:I5", "J4:L5", "M4:O5", "P4:Q5"];
   exportSectionOrder.forEach((section, index) => {
     const sectionDiffs = diffs.filter((diff) => belongsToSection(diff, section));
     const range = cardRanges[index];
@@ -474,7 +484,7 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
         summaryRow = writeSummaryDiffRows(summarySheet, summaryRow, diff, section, index % 2 === 1);
       });
     } else {
-      summarySheet.mergeCells(summaryRow, 1, summaryRow, 15);
+      summarySheet.mergeCells(summaryRow, 1, summaryRow, 17);
       const emptyCell = summarySheet.getRow(summaryRow).getCell(1);
       emptyCell.value = "此分類無差異";
       emptyCell.font = { name: "Microsoft JhengHei", size: 10, italic: true, color: { argb: colors.gray } };
@@ -485,11 +495,11 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
       summaryRow += 1;
     }
   });
-  summarySheet.mergeCells(summaryRow + 1, 1, summaryRow + 1, 15);
+  summarySheet.mergeCells(summaryRow + 1, 1, summaryRow + 1, 17);
   summarySheet.getCell(summaryRow + 1, 1).value = "閱讀版｜完整獨立欄位與篩選請至「差異資料」工作表";
   summarySheet.getCell(summaryRow + 1, 1).font = { name: "Microsoft JhengHei", size: 9, italic: true, color: { argb: colors.gray } };
   summarySheet.getCell(summaryRow + 1, 1).alignment = { horizontal: "right", vertical: "middle" };
-  summarySheet.columns = [11, 11, 16, 16, 12, 12, 15, 15, 15, 6, 15, 15, 15, 9, 9].map((width) => ({ width }));
+  summarySheet.columns = [10, 10, 13, 13, 15, 15, 12, 12, 15, 15, 15, 6, 15, 15, 15, 9, 9].map((width) => ({ width }));
   summarySheet.views = [{ state: "frozen", ySplit: 8, showGridLines: false }];
   summarySheet.pageSetup = {
     orientation: "landscape",
@@ -521,6 +531,8 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
     rows: dataRows,
   });
   styleHeader(dataSheet.getRow(4));
+  [6, 7, 8, 12].forEach((column) => { dataSheet.getRow(4).getCell(column).fill = fill(colors.oldVersion); });
+  [9, 10, 11, 13].forEach((column) => { dataSheet.getRow(4).getCell(column).fill = fill(colors.newVersion); });
   sortedDiffs.forEach((diff, index) => styleDataRow(dataSheet.getRow(5 + index), diff, index % 2 === 1));
   dataSheet.columns = [20, 13, 22, 24, 24, 22, 26, 20, 22, 26, 20, 12, 12, 14].map((width) => ({ width }));
   dataSheet.views = [{ state: "frozen", ySplit: 4, xSplit: 5, showGridLines: false }];
@@ -544,7 +556,7 @@ export async function buildBomReportWithOriginals(diffs: BomDiff[], beforeName: 
   }
   if (context.originalAfter) {
     await appendOriginalBom(workbook, context.originalAfter, "新版原始 BOM");
-    workbook.getWorksheet("差異摘要")!.getCell("J2").value = { text: afterName, hyperlink: "#'新版原始 BOM'!A1" };
+    workbook.getWorksheet("差異摘要")!.getCell("K2").value = { text: afterName, hyperlink: "#'新版原始 BOM'!A1" };
     workbook.getWorksheet("差異資料")!.getCell("E2").value = { text: afterName, hyperlink: "#'新版原始 BOM'!A1" };
   }
   return workbook;

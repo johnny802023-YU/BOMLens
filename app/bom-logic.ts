@@ -7,6 +7,11 @@ export type BomAlternative = {
 };
 
 export type BomStructureKind = "root69" | "vb-t" | "vb-d" | "board60" | "pcb" | "flat";
+export type BomProcessKind = "SMT" | "DIP";
+export type BomProcessChange = {
+  before: BomProcessKind;
+  after: BomProcessKind;
+};
 
 export type BomItem = {
   ref: string;
@@ -45,6 +50,7 @@ export type BomDiff = {
   addedPositions: string[];
   removedPositions: string[];
   replacementPositions: string[];
+  processChange?: BomProcessChange;
   matchConfidence: "high" | "medium" | "low";
   matchReason: string;
   needsReview: boolean;
@@ -128,6 +134,23 @@ export function canonicalPartNumber(value: unknown) {
 
 export function bomStructureLabel(item?: BomItem) {
   return item?.structurePath?.filter(Boolean).join(" › ") ?? "";
+}
+
+export function bomProcessKind(item?: BomItem): BomProcessKind | undefined {
+  if (item?.structureKind === "vb-t" || item?.structureKind === "board60") return "SMT";
+  if (item?.structureKind === "vb-d") return "DIP";
+  return undefined;
+}
+
+export function bomDiffDisplayFields(diff: BomDiff) {
+  const fields = [...diff.fields];
+  if (diff.processChange) {
+    const index = fields.indexOf("製程別放置異常");
+    const label = `製程別放置異常（${diff.processChange.before} → ${diff.processChange.after}）`;
+    if (index >= 0) fields[index] = label;
+    else fields.push(label);
+  }
+  return fields;
 }
 
 function structureMarker(rawPart: string): Exclude<BomStructureKind, "flat"> | null {
@@ -405,17 +428,21 @@ export function rowsToBom(rows: Record<string, unknown>[]): BomItem[] {
 export function compareBom(before: BomItem[], after: BomItem[]): BomDiff[] {
   const beforePartKeys = new Set(before.flatMap((item) => item.alternatives.map(partKey)).filter(Boolean));
   const afterPartKeys = new Set(after.flatMap((item) => item.alternatives.map(partKey)).filter(Boolean));
-  const candidates: Array<{ beforeIndex: number; afterIndex: number; score: number }> = [];
+  const candidates: Array<{ beforeIndex: number; afterIndex: number; score: number; processChange?: BomProcessChange }> = [];
   before.forEach((left, beforeIndex) => after.forEach((right, afterIndex) => {
-    if (!structureCompatible(left, right)) return;
-    const score = groupMatchScore(left, right);
-    if (score > 0) candidates.push({ beforeIndex, afterIndex, score });
+    const sameStructure = structureCompatible(left, right);
+    const processChange = sameStructure ? undefined : processPlacementChange(left, right);
+    if (!sameStructure && !processChange) return;
+    const baseScore = groupMatchScore(left, right);
+    if (baseScore <= 0) return;
+    const score = baseScore + (sameStructure && (left.structureKind ?? "flat") !== "flat" ? 500 : processChange ? 250 : 0);
+    candidates.push({ beforeIndex, afterIndex, score, processChange });
   }));
   candidates.sort((a, b) => b.score - a.score || a.beforeIndex - b.beforeIndex || a.afterIndex - b.afterIndex);
 
   const usedBefore = new Set<number>();
   const usedAfter = new Set<number>();
-  const pairs: Array<{ before?: BomItem; after?: BomItem; score: number; ambiguous: boolean }> = [];
+  const pairs: Array<{ before?: BomItem; after?: BomItem; score: number; ambiguous: boolean; processChange?: BomProcessChange }> = [];
   for (const candidate of candidates) {
     if (usedBefore.has(candidate.beforeIndex) || usedAfter.has(candidate.afterIndex)) continue;
     const competing = candidates.some((other) => other !== candidate
@@ -423,12 +450,12 @@ export function compareBom(before: BomItem[], after: BomItem[]): BomDiff[] {
       && other.score >= candidate.score * 0.9);
     usedBefore.add(candidate.beforeIndex);
     usedAfter.add(candidate.afterIndex);
-    pairs.push({ before: before[candidate.beforeIndex], after: after[candidate.afterIndex], score: candidate.score, ambiguous: competing });
+    pairs.push({ before: before[candidate.beforeIndex], after: after[candidate.afterIndex], score: candidate.score, ambiguous: competing, processChange: candidate.processChange });
   }
   before.forEach((item, index) => { if (!usedBefore.has(index)) pairs.push({ before: item, score: 0, ambiguous: false }); });
   after.forEach((item, index) => { if (!usedAfter.has(index)) pairs.push({ after: item, score: 0, ambiguous: false }); });
 
-  return pairs.map(({ before: a, after: b, score, ambiguous }) => {
+  return pairs.map(({ before: a, after: b, score, ambiguous, processChange }) => {
     const ref = a?.ref ?? b?.ref ?? "";
     const addedParts = differenceParts(b?.alternatives ?? [], a?.alternatives ?? []);
     const removedParts = differenceParts(a?.alternatives ?? [], b?.alternatives ?? []);
@@ -439,7 +466,7 @@ export function compareBom(before: BomItem[], after: BomItem[]): BomDiff[] {
     const replacementPositions = a && b && addedParts.length && removedParts.length
       ? intersectionValues(a.positions, b.positions)
       : [];
-    const match = matchMetadata(a, b, score, ambiguous);
+    const match = matchMetadata(a, b, score, ambiguous, processChange);
     if (!a) {
       return { ref, kind: "added", categories: ["added"], primaryType: "componentAdded", after: b, fields: compactFields(addedParts, [], addedPositions, []), addedParts, removedParts: [], newParts, deletedParts: [], addedPositions, removedPositions: [], replacementPositions: [], ...match };
     }
@@ -449,6 +476,7 @@ export function compareBom(before: BomItem[], after: BomItem[]): BomDiff[] {
 
     let fields = compactFields(addedParts, removedParts, addedPositions, removedPositions, true, true);
     const quantityChanged = a.qty !== b.qty;
+    if (processChange) fields.push("製程別放置異常");
     if (replacementPositions.length) {
       fields = fields.filter((field) => field !== "新增替料" && field !== "刪除替料");
       fields.push("更換料號");
@@ -463,7 +491,7 @@ export function compareBom(before: BomItem[], after: BomItem[]): BomDiff[] {
       && addedParts.length === 0
       && removedParts.length === 0
       && !quantityChanged;
-    if (positionRelocated) {
+    if (positionRelocated || processChange) {
       categories.push("changed");
     } else {
       if (addedParts.length || addedPositions.length) categories.push("added");
@@ -476,7 +504,9 @@ export function compareBom(before: BomItem[], after: BomItem[]): BomDiff[] {
       : categories.includes("changed") || categories.length > 1
         ? "changed"
         : categories[0];
-    const primaryType: DiffPrimaryType = replacementPositions.length || (addedParts.length > 0 && removedParts.length > 0)
+    const primaryType: DiffPrimaryType = processChange
+      ? "positionChanged"
+      : replacementPositions.length || (addedParts.length > 0 && removedParts.length > 0)
       ? "partReplaced"
       : addedParts.length > 0
         ? "substituteAdded"
@@ -500,23 +530,29 @@ export function compareBom(before: BomItem[], after: BomItem[]): BomDiff[] {
       addedPositions,
       removedPositions,
       replacementPositions,
+      ...(processChange ? { processChange } : {}),
       ...match,
     };
   }).sort((a, b) => naturalSort(diffSortKey(a), diffSortKey(b)));
 }
 
-function matchMetadata(before: BomItem | undefined, after: BomItem | undefined, score: number, ambiguous: boolean) {
+function matchMetadata(before: BomItem | undefined, after: BomItem | undefined, score: number, ambiguous: boolean, processChange?: BomProcessChange) {
   if (!before || !after) return { matchConfidence: "high" as const, matchReason: before ? "新版沒有可配對群組" : "舊版沒有可配對群組", needsReview: false };
   const samePositions = before.positions.length > 0 && overlapStats(before.positions, after.positions, normalizeValue).exact;
   const overlappingPositions = overlapStats(before.positions, after.positions, normalizeValue).intersection > 0;
   const sameParts = overlapStats(before.alternatives.map(partKey), after.alternatives.map(partKey), normalizeValue).intersection > 0;
   const confidence = ambiguous || score < 250 ? "low" : score < 700 ? "medium" : "high";
   const sameStructure = structureCompatible(before, after) && (before.structureKind ?? "flat") !== "flat";
-  const reasons = [sameStructure ? "所屬架構相同" : "", samePositions ? "插件位置完全相同" : overlappingPositions ? "部分插件位置相同" : "", sameParts ? "料號重疊" : ""].filter(Boolean);
+  const reasons = [
+    processChange ? `同一料號跨製程架構移動（${processChange.before} → ${processChange.after}）` : "",
+    sameStructure ? "所屬架構相同" : "",
+    samePositions ? "插件位置完全相同" : overlappingPositions ? "部分插件位置相同" : "",
+    sameParts ? "料號重疊" : "",
+  ].filter(Boolean);
   return {
     matchConfidence: confidence,
     matchReason: reasons.join("、") || "依群組相似度配對",
-    needsReview: ambiguous || confidence === "low",
+    needsReview: Boolean(processChange) || ambiguous || confidence === "low",
   };
 }
 
@@ -527,6 +563,24 @@ function structureCompatible(before: BomItem, after: BomItem) {
   const beforeSection = before.structureKey?.split(":")[0];
   const afterSection = after.structureKey?.split(":")[0];
   return !beforeSection || !afterSection || beforeSection === afterSection;
+}
+
+function processPlacementChange(before: BomItem, after: BomItem): BomProcessChange | undefined {
+  const beforeProcess = bomProcessKind(before);
+  const afterProcess = bomProcessKind(after);
+  if (!beforeProcess || !afterProcess || beforeProcess === afterProcess) return undefined;
+
+  const beforeSection = before.structureKey?.split(":")[0];
+  const afterSection = after.structureKey?.split(":")[0];
+  if (beforeSection && afterSection && beforeSection !== afterSection) return undefined;
+
+  const parts = overlapStats(
+    before.alternatives.map((item) => canonicalPartNumber(item.part)),
+    after.alternatives.map((item) => canonicalPartNumber(item.part)),
+    normalizeValue,
+  );
+  if (!parts.intersection) return undefined;
+  return { before: beforeProcess, after: afterProcess };
 }
 
 const primaryTypeSortOrder: Record<DiffPrimaryType, number> = {

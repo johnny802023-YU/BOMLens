@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { analyzeCompanyBomMatrix, canonicalPartNumber, compareBom, detectCompanyColumns, findCompanyHeader, parseCompanyBomMatrix, parseQuantity, sortBomDiffsForAll } from "../app/bom-logic.ts";
+import { analyzeCompanyBomMatrix, bomDiffDisplayFields, bomProcessKind, canonicalPartNumber, compareBom, detectCompanyColumns, findCompanyHeader, parseCompanyBomMatrix, parseQuantity, sortBomDiffsForAll } from "../app/bom-logic.ts";
 import { buildPageReferenceIndex, centeredPdfHitScroll, centeredRenderedHitScroll, findReferenceHits, lookupReferenceHits, normalizeReference } from "../app/pdf-search.ts";
 import ExcelJS from "exceljs";
 import * as XLSX from "xlsx";
@@ -128,16 +128,22 @@ test("builds a concise formatted Excel difference report", async () => {
   assert.equal(summarySheet.views[0].showGridLines, false);
   assert.equal(summarySheet.autoFilter, null);
   assert.equal(summarySheet.getCell("A4").fill.fgColor.argb, "E8F7F0");
-  assert.equal(summarySheet.getCell("A7").value, "異動");
-  assert.equal(summarySheet.getCell("G7").value, "舊版料號資訊");
-  assert.equal(summarySheet.getCell("K7").value, "新版料號資訊");
-  assert.equal(summarySheet.getCell("A8").value, "異動類型");
-  assert.equal(summarySheet.getCell("G8").value, "舊版料號");
-  assert.equal(summarySheet.getCell("H8").value, "舊版製造商料號");
-  assert.equal(summarySheet.getCell("I8").value, "舊版製造商");
-  assert.equal(summarySheet.getCell("K8").value, "新版料號");
-  assert.equal(summarySheet.getCell("L8").value, "新版製造商料號");
-  assert.equal(summarySheet.getCell("M8").value, "新版製造商");
+  assert.equal(summarySheet.getCell("A7").value, "主要異動");
+  assert.equal(summarySheet.getCell("C7").value, "差異項目");
+  assert.equal(summarySheet.getCell("E7").value, "料號異動");
+  assert.equal(summarySheet.getCell("G7").value, "插件位置差異");
+  assert.equal(summarySheet.getCell("I7").value, "舊版料號資訊");
+  assert.equal(summarySheet.getCell("M7").value, "新版料號資訊");
+  assert.equal(summarySheet.getCell("A8").value, "新增／刪除／變更");
+  assert.equal(summarySheet.getCell("E8").value, "料號新增／刪除");
+  assert.equal(summarySheet.getCell("I8").value, "舊版料號");
+  assert.equal(summarySheet.getCell("J8").value, "舊版製造商料號");
+  assert.equal(summarySheet.getCell("K8").value, "舊版製造商");
+  assert.equal(summarySheet.getCell("M8").value, "新版料號");
+  assert.equal(summarySheet.getCell("N8").value, "新版製造商料號");
+  assert.equal(summarySheet.getCell("O8").value, "新版製造商");
+  assert.equal(summarySheet.getCell("I7").fill.fgColor.argb, "58677C");
+  assert.equal(summarySheet.getCell("M7").fill.fgColor.argb, "2F6BCE");
   assert.equal(dataSheet.views[0].ySplit, 4);
   assert.equal(dataSheet.views[0].showGridLines, false);
   assert.deepEqual(dataSheet.model.tables.map((table) => table.name), ["BomDiffData"]);
@@ -150,18 +156,20 @@ test("builds a concise formatted Excel difference report", async () => {
   assert.equal(parsed.Sheets["差異摘要"].A1.v, "BOM 差異比較報告");
   assert.equal(parsed.Sheets["差異摘要"].A4.v, "新版完全新料\n1");
   assert.equal(parsed.Sheets["差異摘要"].A9.v, "新版完全新料（1）");
-  assert.equal(parsed.Sheets["差異摘要"].A10.v, "新增料號");
-  assert.equal(parsed.Sheets["差異摘要"].E10.v, "U20 換料");
-  assert.equal(parsed.Sheets["差異摘要"].G10.v, "OLD-PART");
-  assert.equal(parsed.Sheets["差異摘要"].H10.v, "OLD-PART-MPN");
-  assert.equal(parsed.Sheets["差異摘要"].I10.v, "OLD-PART-MAKER");
-  assert.equal(parsed.Sheets["差異摘要"].K10.v, "NEW-PART");
-  assert.equal(parsed.Sheets["差異摘要"].L10.v, "NEW-PART-MPN");
-  assert.equal(parsed.Sheets["差異摘要"].M10.v, "NEW-PART-MAKER");
-  assert.equal(parsed.Sheets["差異摘要"].N10.v, "1 → 1");
+  assert.equal(parsed.Sheets["差異摘要"].A10.v, "變更");
+  assert.equal(parsed.Sheets["差異摘要"].E10.v, "＋ NEW-PART\n－ OLD-PART");
+  assert.equal(parsed.Sheets["差異摘要"].G10.v, "U20 換料");
+  assert.equal(parsed.Sheets["差異摘要"].I10.v, "OLD-PART");
+  assert.equal(parsed.Sheets["差異摘要"].J10.v, "OLD-PART-MPN");
+  assert.equal(parsed.Sheets["差異摘要"].K10.v, "OLD-PART-MAKER");
+  assert.equal(parsed.Sheets["差異摘要"].M10.v, "NEW-PART");
+  assert.equal(parsed.Sheets["差異摘要"].N10.v, "NEW-PART-MPN");
+  assert.equal(parsed.Sheets["差異摘要"].O10.v, "NEW-PART-MAKER");
+  assert.equal(parsed.Sheets["差異摘要"].P10.v, "1 → 1");
   assert.equal(parsed.Sheets["差異摘要"].A13.v, "新版完全移除（1）");
   assert.equal(parsed.Sheets["差異摘要"].A17.v, "數量差異（1）");
-  assert.equal(parsed.Sheets["差異摘要"].A19.v, "僅插件位置差異（0）");
+  assert.equal(parsed.Sheets["差異摘要"].A19.v, "製程別放置異常（0）");
+  assert.equal(parsed.Sheets["差異摘要"].A21.v, "僅插件位置差異（0）");
   assert.equal(parsed.Sheets["差異資料"].A4.v, "分類");
   assert.equal(parsed.Sheets["差異資料"].B4.v, "主要異動");
   assert.equal(parsed.Sheets["差異資料"].F4.v, "舊版主件料號");
@@ -171,6 +179,10 @@ test("builds a concise formatted Excel difference report", async () => {
   assert.equal(parsed.Sheets["差異資料"].E5.v, "U20 換料");
   assert.equal(parsed.Sheets["差異資料"].N5.v, "Same");
   assert.equal(parsed.Sheets["差異資料"].N6.v, "Increase");
+  assert.equal(dataSheet.getCell("F4").fill.fgColor.argb, "58677C");
+  assert.equal(dataSheet.getCell("I4").fill.fgColor.argb, "2F6BCE");
+  assert.equal(dataSheet.getCell("F5").fill.fgColor.argb, "F2F4F7");
+  assert.equal(dataSheet.getCell("I5").fill.fgColor.argb, "EDF4FF");
   assert.ok(buffer.byteLength > 5_000);
 });
 
@@ -206,13 +218,13 @@ test("classifies substitute-only export rows without calling them completely new
   const summarySheet = workbook.getWorksheet("差異摘要");
   assert.deepEqual(
     summarySheet.getColumn(1).values.filter((value) => typeof value === "string" && /（\d+）$/.test(value)),
-    ["新版完全新料（1）", "新增替代（1）", "新版完全移除（1）", "刪除替代（1）", "數量差異（1）", "僅插件位置差異（1）"],
+    ["新版完全新料（1）", "新增替代（1）", "新版完全移除（1）", "刪除替代（1）", "數量差異（1）", "製程別放置異常（0）", "僅插件位置差異（1）"],
   );
   const substituteSectionRow = summarySheet.getColumn(1).values.findIndex((value) => value === "新增替代（1）");
-  assert.equal(summarySheet.getCell(`G${substituteSectionRow + 1}`).value, "MAIN");
-  assert.equal(summarySheet.getCell(`K${substituteSectionRow + 1}`).value, "MAIN");
-  assert.equal(summarySheet.getCell(`K${substituteSectionRow + 2}`).value, "ALT");
-  assert.equal(summarySheet.getCell(`L${substituteSectionRow + 2}`).value, "ALT-MPN");
+  assert.equal(summarySheet.getCell(`I${substituteSectionRow + 1}`).value, "MAIN");
+  assert.equal(summarySheet.getCell(`M${substituteSectionRow + 1}`).value, "MAIN");
+  assert.equal(summarySheet.getCell(`M${substituteSectionRow + 2}`).value, "ALT");
+  assert.equal(summarySheet.getCell(`N${substituteSectionRow + 2}`).value, "ALT-MPN");
   assert.deepEqual(
     [5, 6, 7, 8, 9, 10].map((row) => workbook.getWorksheet("差異資料").getCell(`A${row}`).value),
     ["新版完全新料", "新增替代", "新版完全移除", "刪除替代", "數量差異", "僅插件位置差異"],
@@ -253,6 +265,7 @@ test("includes unchanged before and after BOM worksheets in the Excel report", a
   assert.equal(beforeSheet.views[0].state, "frozen");
   assert.equal(beforeSheet.model.conditionalFormattings.length, 1);
   assert.equal(workbook.getWorksheet("差異摘要").getCell("C2").value.hyperlink, "#'舊版原始 BOM'!A1");
+  assert.equal(workbook.getWorksheet("差異摘要").getCell("K2").value.hyperlink, "#'新版原始 BOM'!A1");
   assert.equal(workbook.getWorksheet("差異資料").getCell("B2").value.hyperlink, "#'舊版原始 BOM'!A1");
 
   const reportBuffer = await workbook.xlsx.writeBuffer();
@@ -526,6 +539,54 @@ test("compares parent structure rows while pairing children only within the same
   assert.ok(!diffs.some((diff) => diff.before?.structureKind === "vb-t" && diff.after?.structureKind === "vb-d"));
   assert.ok(diffs.some((diff) => diff.primaryType === "componentRemoved" && diff.before?.structureKind === "root69"));
   assert.ok(diffs.some((diff) => diff.primaryType === "componentAdded" && diff.after?.structureKind === "root69"));
+});
+
+test("detects the same part moving between SMT and DIP structures", async () => {
+  const header = ["項次", "料號", "數量", "插件位置", "製造商料號"];
+  const bom = (branch) => parseCompanyBomMatrix([
+    header,
+    ["000", "69G14LM12A01", "1", "", "ROOT-MPN"],
+    ["001", branch, "1", "", "BRANCH-MPN"],
+    ["00A", "0500-04WB0ZY", "1", "U20", "FLASH-MPN"],
+  ]);
+  const before = bom("VBG14LM12A01T");
+  const after = bom("VBG14LM12A01D");
+  const beforePart = before.find((item) => item.ref === "00A");
+  const afterPart = after.find((item) => item.ref === "00A");
+  assert.equal(bomProcessKind(beforePart), "SMT");
+  assert.equal(bomProcessKind(afterPart), "DIP");
+
+  const moved = compareBom(before, after).find((diff) => diff.before?.ref === "00A" && diff.after?.ref === "00A");
+  assert.ok(moved);
+  assert.equal(moved.kind, "changed");
+  assert.equal(moved.primaryType, "positionChanged");
+  assert.deepEqual(moved.processChange, { before: "SMT", after: "DIP" });
+  assert.deepEqual(moved.fields, ["製程別放置異常"]);
+  assert.deepEqual(bomDiffDisplayFields(moved), ["製程別放置異常（SMT → DIP）"]);
+  assert.deepEqual(moved.newParts, []);
+  assert.deepEqual(moved.deletedParts, []);
+  assert.equal(moved.needsReview, true);
+  assert.match(moved.matchReason, /同一料號跨製程架構移動/);
+
+  const { exportCategories } = await import("../app/export-report.ts");
+  assert.deepEqual(exportCategories(moved), ["製程別放置異常"]);
+});
+
+test("does not pair different parts merely because they moved between SMT and DIP", () => {
+  const header = ["項次", "料號", "數量", "插件位置"];
+  const bom = (branch, part) => parseCompanyBomMatrix([
+    header,
+    ["000", "69G14LM12A01", "1", ""],
+    ["001", branch, "1", ""],
+    ["00A", part, "1", "U20"],
+  ]);
+  const diffs = compareBom(
+    bom("VBG14LM12A01T", "0500-04WB0ZY"),
+    bom("VBG14LM12A01D", "0603-020R0VD"),
+  );
+  assert.ok(!diffs.some((diff) => diff.processChange));
+  assert.ok(diffs.some((diff) => diff.primaryType === "componentRemoved" && diff.before?.ref === "00A"));
+  assert.ok(diffs.some((diff) => diff.primaryType === "componentAdded" && diff.after?.ref === "00A"));
 });
 
 test("allows optional manufacturer columns to be absent", () => {

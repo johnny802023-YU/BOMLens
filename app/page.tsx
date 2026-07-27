@@ -32,6 +32,7 @@ import { clearInactivePdfCache, PdfSchematicViewer, type PdfScrollSync, type Pdf
 import {
   canonicalPartNumber,
   bomStructureLabel,
+  bomDiffDisplayFields,
   compareBom,
   analyzeCompanyBomMatrix,
   companyColumnLabels,
@@ -49,7 +50,7 @@ import {
   type ImportAudit,
 } from "./bom-logic";
 
-type FieldFilter = "新增料號" | "新增替料" | "新增插件位置" | "刪除料號" | "刪除替料" | "移除插件位置" | "更換料號";
+type FieldFilter = "新增料號" | "新增替料" | "新增插件位置" | "刪除料號" | "刪除替料" | "移除插件位置" | "更換料號" | "製程別放置異常";
 type ImpactFilter = "all" | "purchase" | "deleted" | "review";
 type DiffGroupKey = "added" | "removed" | "changed" | "review";
 
@@ -73,6 +74,7 @@ const fieldFilterOptions: Array<{ key: FieldFilter; label: string }> = [
   { key: "刪除替料", label: "刪除替料" },
   { key: "移除插件位置", label: "移除插件位置" },
   { key: "更換料號", label: "更換料號" },
+  { key: "製程別放置異常", label: "SMT／DIP 放置異常" },
 ];
 
 const primaryTypeLabels: Record<DiffPrimaryType, string> = {
@@ -88,8 +90,8 @@ const primaryTypeLabels: Record<DiffPrimaryType, string> = {
 const diffGroupMeta: Array<{ key: DiffGroupKey; label: string; description: string }> = [
   { key: "added", label: "新增", description: "新版加入的主料或替料" },
   { key: "removed", label: "刪除", description: "新版移除的主料或替料" },
-  { key: "changed", label: "變更", description: "插件位置、數量或同位置換料" },
-  { key: "review", label: "待人工確認", description: "配對依據不明確，需要人工判斷" },
+  { key: "changed", label: "變更", description: "插件位置、數量或同位置換料；另偵測 SMT／DIP 製程別異動" },
+  { key: "review", label: "待人工確認", description: "配對不明確或料號跨 SMT／DIP 架構，需要人工判斷" },
 ];
 
 function bomItem(ref: string, alternatives: Array<[string, string, string?]>, positions: string[], description = ""): BomItem {
@@ -212,7 +214,7 @@ export default function Home() {
   );
   const matchingDiffs = changedDiffs.filter((item) => {
     const manufacturerNames = [...(item.before?.alternatives ?? []), ...(item.after?.alternatives ?? [])].map((part) => part.manufacturerName ?? "").join(" ");
-    const text = `${item.ref} ${diffStructureLabel(item)} ${displayPart(item.before)} ${displayPart(item.after)} ${item.before?.manufacturerPart ?? ""} ${item.after?.manufacturerPart ?? ""} ${manufacturerNames} ${item.fields.join(" ")} ${item.addedPositions.join(" ")} ${item.removedPositions.join(" ")}`.toLowerCase();
+    const text = `${item.ref} ${diffStructureLabel(item)} ${displayPart(item.before)} ${displayPart(item.after)} ${item.before?.manufacturerPart ?? ""} ${item.after?.manufacturerPart ?? ""} ${manufacturerNames} ${bomDiffDisplayFields(item).join(" ")} ${item.addedPositions.join(" ")} ${item.removedPositions.join(" ")}`.toLowerCase();
     const matchesFilter = selectedFields.length === 0 || selectedFields.some((field) => item.fields.includes(field));
     const matchesImpact = impactFilter === "all"
       || (impactFilter === "purchase" && item.newParts.length > 0)
@@ -456,7 +458,7 @@ export default function Home() {
                         }}
                       >
                         <td><PrimaryTypeBadge item={item} /></td>
-                        <td><ChangeFields fields={item.fields} tone={primaryTypeTone(item.primaryType)} /></td>
+                        <td><ChangeFields fields={bomDiffDisplayFields(item)} tone={primaryTypeTone(item.primaryType)} /></td>
                         <td><BPartDifference item={item} /></td>
                         <td><PositionSummary added={item.addedPositions} removed={item.removedPositions} replacement={item.replacementPositions} allPositions={item.after?.positions ?? item.before?.positions ?? []} onLocate={(position) => { setSchematicTarget(position); setSelectedDiff(null); setTab("schematic"); }} /></td>
                         <td><PartList item={item.before} changedParts={item.removedParts} tone="removed" /></td>
@@ -494,7 +496,7 @@ function DiffDetailDrawer({ item, onClose, onLocate }: { item: BomDiff; onClose:
         <section className="detail-hero">
           <small>料號異動</small>
           <h2 id="diff-detail-title">{displayPart(item.before)} <ArrowRight size={17} /> {displayPart(item.after)}</h2>
-          <ChangeFields fields={item.fields} tone={primaryTypeTone(item.primaryType)} />
+          <ChangeFields fields={bomDiffDisplayFields(item)} tone={primaryTypeTone(item.primaryType)} />
         </section>
         <div className="detail-metrics">
           <div><small>舊版數量</small><strong>{item.before?.qty ?? 0}</strong></div>
@@ -502,6 +504,7 @@ function DiffDetailDrawer({ item, onClose, onLocate }: { item: BomDiff; onClose:
           <div><small>新版數量</small><strong>{item.after?.qty ?? 0}</strong></div>
         </div>
         <section className="detail-section"><h3>所屬架構</h3><p className="structure-value">{structure}</p></section>
+        {item.processChange && <section className="detail-section review-reason"><h3><AlertTriangle size={15} /> 製程別放置異常</h3><p>此料號由 {item.processChange.before} 架構移至 {item.processChange.after} 架構，請確認 RD 是否將料件放錯群組。</p></section>}
         <section className="detail-section"><h3>料號與製造廠商</h3>
           <div className="detail-version-grid">
             <article><span>舊版</span><PartList item={item.before} changedParts={item.removedParts} tone="removed" /></article>
@@ -577,7 +580,7 @@ function PrimaryTypeBadge({ item }: { item: BomDiff }) {
 
 function ChangeFields({ fields, tone }: { fields: string[]; tone: string }) {
   return <div className={`change-list ${tone}`}>{fields.map((field) =>
-    <span className="change-pill" key={field}>{field}</span>,
+    <span className={field.startsWith("製程別放置異常") ? "change-pill process-warning" : "change-pill"} key={field}>{field}</span>,
   )}</div>;
 }
 

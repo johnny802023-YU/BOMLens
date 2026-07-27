@@ -1,4 +1,4 @@
-import { bomStructureLabel, sortBomDiffsForAll, type BomAlternative, type BomDiff, type DiffPrimaryType } from "./bom-logic.ts";
+import { bomDiffDisplayFields, bomStructureLabel, sortBomDiffsForAll, type BomAlternative, type BomDiff, type DiffPrimaryType } from "./bom-logic.ts";
 import type { ReportContext } from "./export-report";
 
 const primaryLabels: Record<DiffPrimaryType, string> = {
@@ -58,7 +58,7 @@ export function buildBomHtmlReport(diffs: BomDiff[], beforeName: string, afterNa
   const detailRows = orderedDiffs.map((diff) => `
     <tr>
       <td><span class="type ${typeTone(diff.primaryType)}">${escapeHtml(primaryLabels[diff.primaryType])}</span>${structureHtml(diff)}</td>
-      <td>${joinValues(diff.fields)}</td>
+      <td>${joinValues(bomDiffDisplayFields(diff))}</td>
       <td><span class="plus">${diff.addedParts.length ? `＋ ${joinParts(diff.addedParts)}` : "—"}</span><span class="minus">${diff.removedParts.length ? `－ ${joinParts(diff.removedParts)}` : ""}</span></td>
       <td><span class="plus">${diff.addedPositions.length ? `＋ ${joinValues(diff.addedPositions)}` : "—"}</span><span class="minus">${diff.removedPositions.length ? `－ ${joinValues(diff.removedPositions)}` : ""}</span>${diff.replacementPositions.length ? `<span class="change">${joinValues(diff.replacementPositions)} 換料</span>` : ""}</td>
       <td><strong>${diff.before ? joinParts(diff.before.alternatives) : "—"}</strong><small><b>製造廠商料號</b> ${diff.before ? joinValues(diff.before.alternatives.map((part) => part.manufacturerPart).filter(Boolean)) : "—"}</small><small><b>製造廠商</b> ${diff.before ? joinValues(diff.before.alternatives.map((part) => part.manufacturerName ?? "").filter(Boolean)) : "—"}</small></td>

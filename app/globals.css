@@ -220,6 +220,7 @@ tbody tr:nth-last-child(-n+2) .confidence-popover:hover .confidence-tooltip, tbo
 .change-list.removed .change-pill { border-color: #efd5d5; color: #a55252; background: #fff7f7; }
 .change-list.changed .change-pill { border-color: #d6e1f5; color: #42689f; background: #f4f7fd; }
 .change-list.replacement .change-pill { border-color: #eadbbf; color: #8a6426; background: #fff9ee; }
+.change-list .change-pill.process-warning { border-color: #e8c47f; color: #885d15; background: #fff6df; }
 .part-list { display: flex; flex-direction: column; gap: 5px; }
 .part-entry { min-width: 0; padding: 4px 6px; display: flex; gap: 7px; align-items: flex-start; border: 1px solid transparent; border-radius: 5px; }
 .part-entry.added { border-color: #bce6d3; background: #effaf5; }
