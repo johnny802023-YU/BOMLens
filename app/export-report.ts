@@ -70,6 +70,16 @@ function partLabel(part: BomAlternative) {
   return part.part || part.manufacturerPart || "未提供料號";
 }
 
+function partIdentity(part: BomAlternative) {
+  return part.part.trim().toUpperCase();
+}
+
+function includesPart(parts: BomAlternative[], candidate?: BomAlternative) {
+  if (!candidate) return false;
+  const identity = partIdentity(candidate);
+  return Boolean(identity) && parts.some((part) => partIdentity(part) === identity);
+}
+
 function listPartNumbers(parts: BomAlternative[]) {
   return parts.map(partLabel).join("\n");
 }
@@ -146,6 +156,27 @@ function fill(color: string): ExcelJS.Fill {
 function border(): Partial<ExcelJS.Borders> {
   const side = { style: "thin" as const, color: { argb: colors.border } };
   return { top: side, left: side, bottom: side, right: side };
+}
+
+function styleChangedPartCells(row: ExcelJS.Row, columns: number[], tone: "removed" | "added") {
+  const foreground = tone === "removed" ? colors.red : colors.green;
+  const background = tone === "removed" ? colors.paleRed : colors.paleGreen;
+  columns.forEach((column, index) => {
+    const cell = row.getCell(column);
+    cell.fill = fill(background);
+    cell.font = {
+      name: "Microsoft JhengHei",
+      size: 10,
+      bold: index === 0,
+      color: { argb: foreground },
+    };
+    if (index === 0) {
+      cell.border = {
+        ...border(),
+        left: { style: "medium", color: { argb: foreground } },
+      };
+    }
+  });
 }
 
 function styleTitle(sheet: ExcelJS.Worksheet, range: string, title: string) {
@@ -240,6 +271,12 @@ function styleDataRow(row: ExcelJS.Row, diff: BomDiff, striped: boolean) {
   typeCell.fill = fill(tone.fill);
   [6, 7, 8, 12].forEach((column) => { row.getCell(column).fill = fill(colors.paleOldVersion); });
   [9, 10, 11, 13].forEach((column) => { row.getCell(column).fill = fill(colors.paleNewVersion); });
+  if (beforeParts.length > 0 && beforeParts.every((part) => includesPart(diff.removedParts, part))) {
+    styleChangedPartCells(row, [6, 7, 8], "removed");
+  }
+  if (afterParts.length > 0 && afterParts.every((part) => includesPart(diff.addedParts, part))) {
+    styleChangedPartCells(row, [9, 10, 11], "added");
+  }
   row.getCell(12).numFmt = "#,##0";
   row.getCell(13).numFmt = "#,##0";
   const trendCell = row.getCell(14);
@@ -327,6 +364,8 @@ function writeSummaryDiffRows(
     [13, 14, 15].forEach((column) => { partRow.getCell(column).fill = fill(colors.paleNewVersion); });
     partRow.getCell(9).font = { name: "Microsoft JhengHei", size: 10, bold: index === 0, color: { argb: "344054" } };
     partRow.getCell(13).font = { name: "Microsoft JhengHei", size: 10, bold: index === 0, color: { argb: "344054" } };
+    if (includesPart(diff.removedParts, beforePart)) styleChangedPartCells(partRow, [9, 10, 11], "removed");
+    if (includesPart(diff.addedParts, afterPart)) styleChangedPartCells(partRow, [13, 14, 15], "added");
   }
 
   const tone = sectionTone(section);
@@ -471,6 +510,10 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
     cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
     cell.border = border();
   });
+  summarySheet.mergeCells("A6:Q6");
+  summarySheet.getCell("A6").value = "顏色說明｜淡紅：舊版刪除／停用料號　淡綠：新版新增／改用料號　灰／藍：料號未異動";
+  summarySheet.getCell("A6").font = { name: "Microsoft JhengHei", size: 9, color: { argb: colors.gray } };
+  summarySheet.getCell("A6").alignment = { horizontal: "right", vertical: "middle" };
 
   styleSummaryHeaderRow(summarySheet, 7, summaryColumnGroups, colors.navy);
   styleSummaryHeaderRow(summarySheet, 8, summarySubHeaders, colors.blue);
@@ -519,6 +562,10 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
   ["A2", "D2"].forEach((address) => {
     dataSheet.getCell(address).font = { name: "Microsoft JhengHei", bold: true, color: { argb: colors.gray } };
   });
+  dataSheet.mergeCells("A3:N3");
+  dataSheet.getCell("A3").value = "顏色說明｜淡紅：舊版刪除／停用料號　淡綠：新版新增／改用料號　灰／藍：料號未異動";
+  dataSheet.getCell("A3").font = { name: "Microsoft JhengHei", size: 9, color: { argb: colors.gray } };
+  dataSheet.getCell("A3").alignment = { horizontal: "right", vertical: "middle" };
   const sortedDiffs = sortForData(diffs);
   const dataRows = sortedDiffs.map((diff) => [exportCategoryLabel(diff), ...detailRowValues(diff)]);
   dataSheet.addTable({

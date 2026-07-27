@@ -144,6 +144,13 @@ test("builds a concise formatted Excel difference report", async () => {
   assert.equal(summarySheet.getCell("O8").value, "新版製造商");
   assert.equal(summarySheet.getCell("I7").fill.fgColor.argb, "58677C");
   assert.equal(summarySheet.getCell("M7").fill.fgColor.argb, "2F6BCE");
+  assert.match(summarySheet.getCell("A6").value, /淡紅：舊版刪除／停用料號/);
+  assert.equal(summarySheet.getCell("I10").fill.fgColor.argb, "FFF0F0");
+  assert.equal(summarySheet.getCell("I10").font.color.argb, "B14949");
+  assert.equal(summarySheet.getCell("I10").border.left.style, "medium");
+  assert.equal(summarySheet.getCell("M10").fill.fgColor.argb, "E8F7F0");
+  assert.equal(summarySheet.getCell("M10").font.color.argb, "16835D");
+  assert.equal(summarySheet.getCell("M10").border.left.style, "medium");
   assert.equal(dataSheet.views[0].ySplit, 4);
   assert.equal(dataSheet.views[0].showGridLines, false);
   assert.deepEqual(dataSheet.model.tables.map((table) => table.name), ["BomDiffData"]);
@@ -181,8 +188,10 @@ test("builds a concise formatted Excel difference report", async () => {
   assert.equal(parsed.Sheets["差異資料"].N6.v, "Increase");
   assert.equal(dataSheet.getCell("F4").fill.fgColor.argb, "58677C");
   assert.equal(dataSheet.getCell("I4").fill.fgColor.argb, "2F6BCE");
-  assert.equal(dataSheet.getCell("F5").fill.fgColor.argb, "F2F4F7");
-  assert.equal(dataSheet.getCell("I5").fill.fgColor.argb, "EDF4FF");
+  assert.equal(dataSheet.getCell("F5").fill.fgColor.argb, "FFF0F0");
+  assert.equal(dataSheet.getCell("F5").font.color.argb, "B14949");
+  assert.equal(dataSheet.getCell("I5").fill.fgColor.argb, "E8F7F0");
+  assert.equal(dataSheet.getCell("I5").font.color.argb, "16835D");
   assert.ok(buffer.byteLength > 5_000);
 });
 
@@ -225,6 +234,9 @@ test("classifies substitute-only export rows without calling them completely new
   assert.equal(summarySheet.getCell(`M${substituteSectionRow + 1}`).value, "MAIN");
   assert.equal(summarySheet.getCell(`M${substituteSectionRow + 2}`).value, "ALT");
   assert.equal(summarySheet.getCell(`N${substituteSectionRow + 2}`).value, "ALT-MPN");
+  assert.equal(summarySheet.getCell(`M${substituteSectionRow + 1}`).fill.fgColor.argb, "EDF4FF");
+  assert.equal(summarySheet.getCell(`M${substituteSectionRow + 2}`).fill.fgColor.argb, "E8F7F0");
+  assert.equal(summarySheet.getCell(`M${substituteSectionRow + 2}`).font.color.argb, "16835D");
   assert.deepEqual(
     [5, 6, 7, 8, 9, 10].map((row) => workbook.getWorksheet("差異資料").getCell(`A${row}`).value),
     ["新版完全新料", "新增替代", "新版完全移除", "刪除替代", "數量差異", "僅插件位置差異"],
