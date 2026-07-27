@@ -97,7 +97,7 @@ export function buildBomHtmlReport(diffs: BomDiff[], beforeName: string, afterNa
     <div class="actions"><button type="button" onclick="window.print()">列印／另存 PDF</button></div>
     <div class="files"><div class="file"><small>舊版 BOM</small><strong>${escapeHtml(beforeName)}</strong></div><div class="arrow">→</div><div class="file"><small>新版 BOM</small><strong>${escapeHtml(afterName)}</strong></div></div>
     <div class="cards"><div class="card"><small>差異群組</small><strong>${diffs.length}</strong></div><div class="card new"><small>新版完全新料</small><strong>${newParts.size}</strong></div><div class="card removed"><small>新版完全移除</small><strong>${deletedParts.size}</strong></div></div>
-    <section><h2>差異明細</h2><div class="table-wrap"><table><thead><tr><th>主要異動</th><th>影響標籤</th><th>料號新增／刪除</th><th>插件位置差異</th><th>舊版主件料號／製造廠商資訊</th><th>新版主件料號／製造廠商資訊</th><th>數量</th><th>人工確認</th></tr></thead><tbody>${detailRows || `<tr><td colspan="8" class="empty">沒有差異</td></tr>`}</tbody></table></div></section>
+    <section><h2>差異明細</h2><div class="table-wrap"><table><thead><tr><th>主要異動</th><th>差異項目</th><th>料號異動</th><th>插件位置差異</th><th>舊版主件料號／製造廠商資訊</th><th>新版主件料號／製造廠商資訊</th><th>數量</th><th>人工確認</th></tr></thead><tbody>${detailRows || `<tr><td colspan="8" class="empty">沒有差異</td></tr>`}</tbody></table></div></section>
     ${lifecycleSection}
     ${reviewSection}
     ${auditSection}

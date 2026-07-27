@@ -4,6 +4,8 @@
 import {
   AlertTriangle,
   ArrowRight,
+  ChevronDown,
+  ChevronRight,
   CircuitBoard,
   Download,
   FileSpreadsheet,
@@ -49,6 +51,7 @@ import {
 
 type FieldFilter = "新增料號" | "新增替料" | "新增插件位置" | "刪除料號" | "刪除替料" | "移除插件位置" | "更換料號";
 type ImpactFilter = "all" | "purchase" | "deleted" | "review";
+type DiffGroupKey = "added" | "removed" | "changed" | "review";
 
 type ImportSheet = { name: string; matrix: unknown[][] };
 type PendingImport = {
@@ -81,6 +84,13 @@ const primaryTypeLabels: Record<DiffPrimaryType, string> = {
   positionChanged: "變更",
   same: "相同",
 };
+
+const diffGroupMeta: Array<{ key: DiffGroupKey; label: string; description: string }> = [
+  { key: "added", label: "新增", description: "新版加入的主料或替料" },
+  { key: "removed", label: "刪除", description: "新版移除的主料或替料" },
+  { key: "changed", label: "變更", description: "插件位置、數量或同位置換料" },
+  { key: "review", label: "待人工確認", description: "配對依據不明確，需要人工判斷" },
+];
 
 function bomItem(ref: string, alternatives: Array<[string, string, string?]>, positions: string[], description = ""): BomItem {
   const parts = alternatives.map(([part, manufacturerPart, manufacturerName = ""]) => ({ part: canonicalPartNumber(part), manufacturerPart, manufacturerName, description, spec: "" }));
@@ -138,6 +148,17 @@ function primaryTypeTone(type: DiffPrimaryType) {
   return "changed";
 }
 
+function diffGroupKey(item: BomDiff): DiffGroupKey {
+  if (item.needsReview) return "review";
+  if (item.primaryType === "componentAdded" || item.primaryType === "substituteAdded") return "added";
+  if (item.primaryType === "componentRemoved" || item.primaryType === "substituteRemoved") return "removed";
+  return "changed";
+}
+
+function diffRowKey(item: BomDiff, index: number) {
+  return `${item.before?.structureKey ?? "none"}>${item.after?.structureKey ?? "none"}:${item.ref}:${index}`;
+}
+
 function diffStructureLabel(item: BomDiff) {
   const before = bomStructureLabel(item.before);
   const after = bomStructureLabel(item.after);
@@ -172,6 +193,8 @@ export default function Home() {
   const [sessionOpen, setSessionOpen] = useState(false);
   const [sessionRecords, setSessionRecords] = useState<ImportRecord[]>([]);
   const [schematicTarget, setSchematicTarget] = useState("");
+  const [selectedDiff, setSelectedDiff] = useState<BomDiff | null>(null);
+  const [collapsedGroups, setCollapsedGroups] = useState<DiffGroupKey[]>([]);
   const beforeInput = useRef<HTMLInputElement>(null);
   const afterInput = useRef<HTMLInputElement>(null);
 
@@ -198,11 +221,20 @@ export default function Home() {
     return matchesFilter && matchesImpact && text.includes(query.toLowerCase());
   });
   const visible = sortBomDiffsForAll(matchingDiffs);
+  const visibleGroups = diffGroupMeta
+    .map((group) => ({ ...group, items: visible.filter((item) => diffGroupKey(item) === group.key) }))
+    .filter((group) => group.items.length > 0);
 
   function toggleFieldFilter(field: FieldFilter) {
     setSelectedFields((current) => current.includes(field)
       ? current.filter((selected) => selected !== field)
       : [...current, field]);
+  }
+
+  function toggleDiffGroup(group: DiffGroupKey) {
+    setCollapsedGroups((current) => current.includes(group)
+      ? current.filter((item) => item !== group)
+      : [...current, group]);
   }
 
   async function loadBom(file: File, side: "before" | "after") {
@@ -239,7 +271,7 @@ export default function Home() {
 
   function resetComparison() {
     setBefore([]); setAfter([]); setBeforeName(""); setAfterName(""); setBeforeAudit(null); setAfterAudit(null); setOriginalBefore(null); setOriginalAfter(null);
-    setQuery(""); setFilter("all"); setImpactFilter("all"); setTab("bom");
+    setQuery(""); setSelectedFields([]); setImpactFilter("all"); setSelectedDiff(null); setCollapsedGroups([]); setTab("bom");
     window.setTimeout(() => beforeInput.current?.click(), 0);
   }
 
@@ -396,23 +428,44 @@ export default function Home() {
               <div className="table-tools">
                 <label className="search"><Search size={17} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜尋主件料號、製造廠商或插件位置" /></label>
                 <div className="filter-panel">
-                  <div className="filters primary-filters"><span className="filter-title"><Filter size={14} />影響標籤（可複選）</span><button onClick={() => setSelectedFields([])} className={selectedFields.length === 0 ? "active" : ""}>全部</button>{fieldFilterOptions.map((option) => <button key={option.key} onClick={() => toggleFieldFilter(option.key)} className={selectedFields.includes(option.key) ? "active" : ""} aria-pressed={selectedFields.includes(option.key)}>{option.label}</button>)}</div>
+                  <div className="filters primary-filters"><span className="filter-title"><Filter size={14} />差異項目（可複選）</span><button onClick={() => setSelectedFields([])} className={selectedFields.length === 0 ? "active" : ""}>全部</button>{fieldFilterOptions.map((option) => <button key={option.key} onClick={() => toggleFieldFilter(option.key)} className={selectedFields.includes(option.key) ? "active" : ""} aria-pressed={selectedFields.includes(option.key)}>{option.label}</button>)}</div>
                   <div className="filters impact-filters"><span className="filter-title">影響條件</span>{([{ key: "all", label: "不限" }, { key: "purchase", label: "新版完全新料" }, { key: "deleted", label: "新版完全移除" }, { key: "review", label: "待人工確認" }] as const).map((option) => <button key={option.key} onClick={() => setImpactFilter(option.key)} className={impactFilter === option.key ? "active" : ""}>{option.label}</button>)}</div>
                 </div>
               </div>
               <div className="table-wrap">
-                <table>
-                  <thead><tr><th>主要異動</th><th>影響標籤</th><th>料號新增／刪除</th><th>插件位置差異</th><th>舊版主件料號／製造廠商資訊</th><th></th><th>新版主件料號／製造廠商資訊</th><th>數量</th></tr></thead>
-                  <tbody>{visible.map((item, index) => <tr key={`${item.before?.structureKey ?? "none"}>${item.after?.structureKey ?? "none"}:${item.ref}:${index}`}>
-                    <td><PrimaryTypeBadge item={item} /></td>
-                    <td><ChangeFields fields={item.fields} /></td>
-                    <td><BPartDifference item={item} /></td>
-                    <td><PositionSummary added={item.addedPositions} removed={item.removedPositions} replacement={item.replacementPositions} allPositions={item.after?.positions ?? item.before?.positions ?? []} onLocate={(position) => { setSchematicTarget(position); setTab("schematic"); }} /></td>
-                    <td><PartList item={item.before} changedParts={item.removedParts} tone="removed" /></td>
-                    <td><ArrowRight size={16} className="row-arrow" /></td>
-                    <td><PartList item={item.after} changedParts={item.addedParts} tone="added" /></td>
-                    <td><span className={item.before?.qty !== item.after?.qty ? "qty changed-qty" : "qty"}>{item.before?.qty ?? 0} → {item.after?.qty ?? 0}</span></td>
-                  </tr>)}</tbody>
+                <table className="diff-table">
+                  <thead><tr><th>主要異動</th><th>差異項目</th><th>料號異動</th><th>插件位置差異</th><th>舊版主件料號／製造廠商資訊</th><th></th><th>新版主件料號／製造廠商資訊</th><th>數量</th></tr></thead>
+                  {visibleGroups.map((group) => {
+                    const collapsed = collapsedGroups.includes(group.key);
+                    return <tbody className={`diff-group ${group.key}`} key={group.key}>
+                      <tr className="diff-group-heading"><td colSpan={8}><button type="button" onClick={() => toggleDiffGroup(group.key)} aria-expanded={!collapsed}>
+                        <span className="group-chevron">{collapsed ? <ChevronRight size={15} /> : <ChevronDown size={15} />}</span>
+                        <strong>{group.label}</strong><span className="group-count">{group.items.length}</span><small>{group.description}</small>
+                      </button></td></tr>
+                      {!collapsed && group.items.map((item, index) => <tr
+                        className={`diff-row ${primaryTypeTone(item.primaryType)} ${selectedDiff === item ? "selected" : ""}`}
+                        key={diffRowKey(item, index)}
+                        tabIndex={0}
+                        aria-label={`查看${primaryTypeLabel(item.primaryType)}差異詳細資料`}
+                        onClick={() => setSelectedDiff(item)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            setSelectedDiff(item);
+                          }
+                        }}
+                      >
+                        <td><PrimaryTypeBadge item={item} /></td>
+                        <td><ChangeFields fields={item.fields} tone={primaryTypeTone(item.primaryType)} /></td>
+                        <td><BPartDifference item={item} /></td>
+                        <td><PositionSummary added={item.addedPositions} removed={item.removedPositions} replacement={item.replacementPositions} allPositions={item.after?.positions ?? item.before?.positions ?? []} onLocate={(position) => { setSchematicTarget(position); setSelectedDiff(null); setTab("schematic"); }} /></td>
+                        <td><PartList item={item.before} changedParts={item.removedParts} tone="removed" /></td>
+                        <td><ArrowRight size={16} className="row-arrow" /></td>
+                        <td><PartList item={item.after} changedParts={item.addedParts} tone="added" /></td>
+                        <td><span className={item.before?.qty !== item.after?.qty ? "qty changed-qty" : "qty"}>{item.before?.qty ?? 0} → {item.after?.qty ?? 0}</span></td>
+                      </tr>)}
+                    </tbody>;
+                  })}
                 </table>
                 {!visible.length && <div className="empty-state">沒有符合條件的差異</div>}
               </div>
@@ -423,8 +476,46 @@ export default function Home() {
       </section>
       {pendingImport && <ImportReviewDialog pending={pendingImport} onChange={setPendingImport} onCancel={() => setPendingImport(null)} onConfirm={confirmImport} />}
       {sessionOpen && <SessionDialog records={sessionRecords} onClose={() => setSessionOpen(false)} />}
+      {selectedDiff && <DiffDetailDrawer item={selectedDiff} onClose={() => setSelectedDiff(null)} onLocate={(position) => { setSchematicTarget(position); setSelectedDiff(null); setTab("schematic"); }} />}
     </main>
   );
+}
+
+function DiffDetailDrawer({ item, onClose, onLocate }: { item: BomDiff; onClose: () => void; onLocate: (position: string) => void }) {
+  const structure = diffStructureLabel(item) || "未標示架構";
+  const positions = [...new Set([...(item.replacementPositions ?? []), ...(item.addedPositions ?? []), ...(item.removedPositions ?? []), ...(item.after?.positions ?? []), ...(item.before?.positions ?? [])])];
+  return <div className="detail-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <aside className="detail-drawer" role="dialog" aria-modal="true" aria-labelledby="diff-detail-title">
+      <header>
+        <div><span className={`primary-badge ${primaryTypeTone(item.primaryType)}`}>{primaryTypeLabel(item.primaryType)}</span><small>差異群組詳細資料</small></div>
+        <button type="button" onClick={onClose} aria-label="關閉詳細資料"><X size={18} /></button>
+      </header>
+      <div className="detail-content">
+        <section className="detail-hero">
+          <small>料號異動</small>
+          <h2 id="diff-detail-title">{displayPart(item.before)} <ArrowRight size={17} /> {displayPart(item.after)}</h2>
+          <ChangeFields fields={item.fields} tone={primaryTypeTone(item.primaryType)} />
+        </section>
+        <div className="detail-metrics">
+          <div><small>舊版數量</small><strong>{item.before?.qty ?? 0}</strong></div>
+          <span><ArrowRight size={16} /></span>
+          <div><small>新版數量</small><strong>{item.after?.qty ?? 0}</strong></div>
+        </div>
+        <section className="detail-section"><h3>所屬架構</h3><p className="structure-value">{structure}</p></section>
+        <section className="detail-section"><h3>料號與製造廠商</h3>
+          <div className="detail-version-grid">
+            <article><span>舊版</span><PartList item={item.before} changedParts={item.removedParts} tone="removed" /></article>
+            <article><span>新版</span><PartList item={item.after} changedParts={item.addedParts} tone="added" /></article>
+          </div>
+        </section>
+        <section className="detail-section"><h3>插件位置</h3>
+          {positions.length ? <div className="detail-positions">{positions.map((position) => <button type="button" key={position} onClick={() => onLocate(position)} title={`在線路圖定位 ${position}`}><CircuitBoard size={14} />{position}</button>)}</div> : <p className="detail-empty">沒有插件位置資料</p>}
+        </section>
+        {(item.needsReview || item.matchConfidence === "low") && <section className="detail-section review-reason"><h3><AlertTriangle size={15} /> 待人工確認</h3><p>{item.matchReason}</p></section>}
+      </div>
+      <footer><button type="button" className="secondary" onClick={onClose}>關閉</button>{positions[0] && <button type="button" className="primary" onClick={() => onLocate(positions[0])}><CircuitBoard size={15} /> 定位第一個插件位置</button>}</footer>
+    </aside>
+  </div>;
 }
 
 function ImportReviewDialog({ pending, onChange, onCancel, onConfirm }: { pending: PendingImport; onChange: (value: PendingImport) => void; onCancel: () => void; onConfirm: () => void }) {
@@ -484,16 +575,10 @@ function PrimaryTypeBadge({ item }: { item: BomDiff }) {
   </div>;
 }
 
-function ChangeFields({ fields }: { fields: string[] }) {
-  return <div className="change-list">{fields.map((field) => {
-    const tone = field === "新增替料" || field === "新增料號" ? "added"
-      : field === "刪除替料" || field === "刪除料號" ? "removed"
-        : field === "新增插件位置" ? "position"
-          : field === "移除插件位置" ? "removed-position"
-            : field === "更換料號" ? "replacement"
-                : "manufacturer";
-    return <span className={`change-pill ${tone}`} key={field}>{field}</span>;
-  })}</div>;
+function ChangeFields({ fields, tone }: { fields: string[]; tone: string }) {
+  return <div className={`change-list ${tone}`}>{fields.map((field) =>
+    <span className="change-pill" key={field}>{field}</span>,
+  )}</div>;
 }
 
 function BPartDifference({ item }: { item: BomDiff }) {
@@ -505,12 +590,12 @@ function BPartDifference({ item }: { item: BomDiff }) {
   return <div className="b-diff-list">
     {item.addedParts.map((part) => {
       const globallyNew = newKeys.has(canonicalPartNumber(part.part).toUpperCase());
-      const label = globallyNew ? "新增料號 · 新版完全新料" : item.replacementPositions.length ? "此位置改用" : item.before ? "新增替料" : "新增料號";
+      const label = item.primaryType === "substituteAdded" ? "替料" : globallyNew ? "完全新料" : item.replacementPositions.length ? "改用" : item.before ? "替料" : "新增料號";
       return <div className="b-diff added" key={`a-${part.part}`}><span>{label}</span><strong>+ {alternativeLabel(part)}</strong></div>;
     })}
     {item.removedParts.map((part) => {
       const globallyDeleted = deletedKeys.has(canonicalPartNumber(part.part).toUpperCase());
-      const label = globallyDeleted ? "刪除料號 · 新版完全移除" : item.replacementPositions.length ? "此位置停用" : item.after ? "刪除替料" : "刪除料號";
+      const label = item.primaryType === "substituteRemoved" ? "替料" : globallyDeleted ? "完全移除" : item.replacementPositions.length ? "停用" : item.after ? "替料" : "刪除料號";
       return <div className="b-diff removed" key={`r-${part.part}`}><span>{label}</span><strong>− {alternativeLabel(part)}</strong></div>;
     })}
   </div>;
@@ -530,11 +615,11 @@ function PartList({ item, changedParts, tone }: { item?: BomItem; changedParts: 
 }
 
 function PositionSummary({ added, removed, replacement, allPositions, onLocate }: { added: string[]; removed: string[]; replacement: string[]; allPositions: string[]; onLocate: (position: string) => void }) {
-  if (!added.length && !removed.length && !replacement.length) return allPositions.length ? <div className="position-list unchanged"><small>位置未變・點擊定位</small>{allPositions.map((position) => <button className="position-chip neutral" title={`在線路圖定位 ${position}`} onClick={() => onLocate(position)} key={`n-${position}`}>{position}</button>)}</div> : <span className="no-change">—</span>;
+  if (!added.length && !removed.length && !replacement.length) return allPositions.length ? <div className="position-list unchanged"><small>位置未變・點擊定位</small>{allPositions.map((position) => <button className="position-chip neutral" title={`在線路圖定位 ${position}`} onClick={(event) => { event.stopPropagation(); onLocate(position); }} key={`n-${position}`}>{position}</button>)}</div> : <span className="no-change">—</span>;
   return <div className="position-list">
-    {replacement.map((position) => <button className="position-chip changed" title={`在線路圖定位 ${position}`} onClick={() => onLocate(position)} key={`c-${position}`}>{position} 換料</button>)}
-    {added.map((position) => <button className="position-chip added" title={`在線路圖定位 ${position}`} onClick={() => onLocate(position)} key={`a-${position}`}>+ {position}</button>)}
-    {removed.map((position) => <button className="position-chip removed" title={`在線路圖定位 ${position}`} onClick={() => onLocate(position)} key={`r-${position}`}>− {position}</button>)}
+    {replacement.map((position) => <button className="position-chip changed" title={`在線路圖定位 ${position}`} onClick={(event) => { event.stopPropagation(); onLocate(position); }} key={`c-${position}`}>{position} 換料</button>)}
+    {added.map((position) => <button className="position-chip added" title={`在線路圖定位 ${position}`} onClick={(event) => { event.stopPropagation(); onLocate(position); }} key={`a-${position}`}>+ {position}</button>)}
+    {removed.map((position) => <button className="position-chip removed" title={`在線路圖定位 ${position}`} onClick={(event) => { event.stopPropagation(); onLocate(position); }} key={`r-${position}`}>− {position}</button>)}
   </div>;
 }
 
