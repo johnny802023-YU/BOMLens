@@ -989,12 +989,12 @@ test("detects customer BOM defaults and maps reordered location sets with exact 
     positions: ["C1", "C2"],
     rdCustomerPartNumbers: ["CUST-001"],
     alternatives: [
-      { part: "PART-A", manufacturerPart: "mpn-a", description: "", spec: "" },
-      { part: "PART-B", manufacturerPart: "MPN-B", description: "", spec: "" },
+      { part: "PART-A", manufacturerPart: "mpn-a", description: "", spec: "", rdCustomerPartNumbers: ["CUST-001"] },
+      { part: "PART-B", manufacturerPart: "MPN-B", description: "", spec: "", rdCustomerPartNumbers: ["CUST-001"] },
     ],
   }];
   const result = mapCustomerBom(company, records);
-  assert.equal(result.counts.matched, 1);
+  assert.equal(result.counts.matched, 2);
   assert.equal(result.items[0].customerPartNumber, "CUST-001");
   assert.equal(result.items[0].customerMappingStatus, "matched");
 });
@@ -1012,8 +1012,8 @@ test("requires every company MPN to match exactly including suffixes and symbols
     positions: ["U1"],
     rdCustomerPartNumbers: ["CUST"],
     alternatives: [
-      { part: "PART-A", manufacturerPart: "ABC-100-A", description: "", spec: "" },
-      { part: "PART-B", manufacturerPart: "XYZ/200", description: "", spec: "" },
+      { part: "PART-A", manufacturerPart: "ABC-100-A", description: "", spec: "", rdCustomerPartNumbers: ["CUST"] },
+      { part: "PART-B", manufacturerPart: "XYZ/200", description: "", spec: "", rdCustomerPartNumbers: ["CUST"] },
     ],
   }];
   const record = (mpns) => [{ customerPartNumber: "CUST", manufacturerParts: mpns, positions: ["U1"], sourceRow: 2 }];
@@ -1038,6 +1038,46 @@ test("flags RD maintenance when Location and MPN match but the BOM R column is m
   assert.equal(mismatch.items[0].customerMappingStatus, "rd-maintenance-mismatch");
   const matched = mapCustomerBom([companyItem(["CUST-999", "CUST-001"])], records);
   assert.equal(matched.items[0].customerMappingStatus, "matched");
+});
+
+test("maps every main and substitute part independently and keeps multiple customer TPNs", () => {
+  const company = [{
+    ref: "001", part: "PART-A", manufacturerPart: "MPN-A", manufacturerName: "", value: "", description: "", qty: 1,
+    positions: ["U1"],
+    alternatives: [
+      { part: "PART-A", manufacturerPart: "MPN-A", description: "", spec: "", rdCustomerPartNumbers: ["TPN-1", "TPN-2"] },
+      { part: "PART-B", manufacturerPart: "MPN-B", description: "", spec: "", rdCustomerPartNumbers: [] },
+    ],
+  }];
+  const records = [
+    { customerPartNumber: "TPN-1", manufacturerParts: ["MPN-A", "MPN-B"], positions: ["U1"], sourceRow: 2 },
+    { customerPartNumber: "TPN-2", manufacturerParts: ["MPN-A"], positions: ["U1"], sourceRow: 3 },
+  ];
+  const result = mapCustomerBom(company, records);
+  assert.deepEqual(result.items[0].alternatives[0].customerPartNumbers, ["TPN-1", "TPN-2"]);
+  assert.equal(result.items[0].alternatives[0].customerMappingStatus, "matched");
+  assert.deepEqual(result.items[0].alternatives[1].customerPartNumbers, ["TPN-1"]);
+  assert.equal(result.items[0].alternatives[1].customerMappingStatus, "rd-maintenance-missing");
+  assert.equal(result.alternativeRows[1].role, "替料");
+  assert.match(result.alternativeRows[1].reason, /RD 維護/);
+});
+
+test("uses Location to select the correct TPN when the same MPN appears more than once", () => {
+  const item = (ref, position, tpn) => ({
+    ref, part: "SAME-PART", manufacturerPart: "SAME-MPN", manufacturerName: "", value: "", description: "", qty: 1,
+    positions: [position],
+    alternatives: [{ part: "SAME-PART", manufacturerPart: "SAME-MPN", description: "", spec: "", rdCustomerPartNumbers: [tpn] }],
+  });
+  const result = mapCustomerBom(
+    [item("001", "U1", "TPN-U1"), item("002", "U2", "TPN-U2")],
+    [
+      { customerPartNumber: "TPN-U2", manufacturerParts: ["SAME-MPN"], positions: ["U2"], sourceRow: 2 },
+      { customerPartNumber: "TPN-U1", manufacturerParts: ["SAME-MPN"], positions: ["U1"], sourceRow: 3 },
+    ],
+  );
+  assert.deepEqual(result.items[0].alternatives[0].customerPartNumbers, ["TPN-U1"]);
+  assert.deepEqual(result.items[1].alternatives[0].customerPartNumbers, ["TPN-U2"]);
+  assert.equal(result.counts.matched, 2);
 });
 
 test("reports BOM R column changes as TPN differences in exports", async () => {
@@ -1099,7 +1139,7 @@ test("exports customer mapping statuses and MVA details to Excel and HTML", asyn
   const workbook = buildBomReport(diffs, "before.xlsx", "after.xlsx", context);
   assert.ok(workbook.getWorksheet("客戶 BOM TPN 對應"));
   assert.ok(workbook.getWorksheet("MVA 明細"));
-  assert.equal(workbook.getWorksheet("客戶 BOM TPN 對應").getCell("C3").value, "CUST-001");
+  assert.equal(workbook.getWorksheet("客戶 BOM TPN 對應").getCell("G3").value, "CUST-001");
   assert.equal(workbook.getWorksheet("MVA 明細").getCell("B5").value, 1);
   const dataHeaders = workbook.getWorksheet("差異資料").getRow(5).values;
   assert.ok(dataHeaders.includes("新版 BOM R欄 TPN"));

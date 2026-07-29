@@ -5,7 +5,12 @@ export type BomAlternative = {
   description: string;
   spec: string;
   rdCustomerPartNumbers?: string[];
+  customerPartNumbers?: string[];
+  customerMappingStatus?: BomCustomerMappingStatus;
+  customerMappingReason?: string;
 };
+
+export type BomCustomerMappingStatus = "matched" | "rd-maintenance-missing" | "rd-maintenance-mismatch" | "location-unmatched" | "mpn-unmatched" | "missing-mpn" | "tpn-missing" | "ambiguous" | "not-imported";
 
 export type BomStructureKind = "root69" | "vb-t" | "vb-d" | "board60" | "pcb" | "flat";
 export type BomProcessKind = "SMT" | "DIP";
@@ -31,7 +36,8 @@ export type BomItem = {
   structurePath?: string[];
   structureKey?: string;
   customerPartNumber?: string;
-  customerMappingStatus?: "matched" | "rd-maintenance-missing" | "rd-maintenance-mismatch" | "location-unmatched" | "mpn-unmatched" | "missing-mpn" | "ambiguous" | "not-imported";
+  customerPartNumbers?: string[];
+  customerMappingStatus?: BomCustomerMappingStatus;
   customerMappingReason?: string;
   rdCustomerPartNumbers?: string[];
 };

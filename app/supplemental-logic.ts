@@ -1,8 +1,8 @@
-import { bomProcessKind, type BomItem } from "./bom-logic.ts";
+import { bomProcessKind, type BomAlternative, type BomCustomerMappingStatus, type BomItem } from "./bom-logic.ts";
 
 export type CustomerBomColumnKey = "customerPartNumber" | "manufacturerParts" | "positions";
 export type CustomerBomColumnMapping = Partial<Record<CustomerBomColumnKey, number>>;
-export type CustomerMappingStatus = "matched" | "rd-maintenance-missing" | "rd-maintenance-mismatch" | "location-unmatched" | "mpn-unmatched" | "missing-mpn" | "ambiguous" | "not-imported";
+export type CustomerMappingStatus = BomCustomerMappingStatus;
 
 export type CustomerBomRecord = {
   customerPartNumber: string;
@@ -17,11 +17,27 @@ export type CustomerMappingRow = {
   reason: string;
   companyItem?: BomItem;
   companyManufacturerParts: string[];
+  companyPartNumbers: string[];
+  companyRdCustomerPartNumbers: string[];
+};
+
+export type CustomerAlternativeMappingRow = {
+  itemIndex: number;
+  alternativeIndex: number;
+  role: "主料" | "替料";
+  part: string;
+  manufacturerPart: string;
+  positions: string[];
+  rdCustomerPartNumbers: string[];
+  customerPartNumbers: string[];
+  status: Exclude<CustomerMappingStatus, "not-imported">;
+  reason: string;
 };
 
 export type CustomerMappingResult = {
   items: BomItem[];
   rows: CustomerMappingRow[];
+  alternativeRows: CustomerAlternativeMappingRow[];
   counts: Record<Exclude<CustomerMappingStatus, "not-imported">, number>;
 };
 
@@ -191,113 +207,206 @@ function companyMpns(item: BomItem) {
   return [...new Set(item.alternatives.map((alternative) => normalizeMpn(alternative.manufacturerPart)).filter(Boolean))];
 }
 
-function rdCustomerNumbers(item: BomItem) {
-  return [...new Set((item.rdCustomerPartNumbers ?? item.alternatives.flatMap((alternative) => alternative.rdCustomerPartNumbers ?? []))
+function rdCustomerNumbers(item: BomItem | BomAlternative) {
+  const values = "alternatives" in item
+    ? item.rdCustomerPartNumbers ?? item.alternatives.flatMap((alternative) => alternative.rdCustomerPartNumbers ?? [])
+    : item.rdCustomerPartNumbers ?? [];
+  return [...new Set(values
     .map((partNumber) => partNumber.trim().toUpperCase())
     .filter(Boolean))];
 }
 
-function maintainedStatus(item: BomItem, record: CustomerBomRecord) {
-  const maintained = rdCustomerNumbers(item);
-  const expected = record.customerPartNumber.trim().toUpperCase();
-  if (!maintained.length) return "rd-maintenance-missing" as const;
-  if (!expected || !maintained.includes(expected)) return "rd-maintenance-mismatch" as const;
+function maintainedStatus(item: BomItem | BomAlternative, expectedTpns: string[]) {
+  const maintained = new Set(rdCustomerNumbers(item));
+  const expected = [...new Set(expectedTpns.map((value) => value.trim().toUpperCase()).filter(Boolean))];
+  if (!maintained.size) return "rd-maintenance-missing" as const;
+  if (expected.some((tpn) => !maintained.has(tpn))) return "rd-maintenance-mismatch" as const;
   return "matched" as const;
 }
 
-function allCompanyMpnsMatch(item: BomItem, record: CustomerBomRecord) {
-  const company = companyMpns(item);
-  const customer = new Set(record.manufacturerParts.map(normalizeMpn));
-  return company.length > 0 && record.manufacturerParts.length > 0 && company.every((mpn) => customer.has(mpn));
+function unique(values: string[]) {
+  return [...new Set(values.filter(Boolean))];
 }
 
 function emptyCounts(): CustomerMappingResult["counts"] {
-  return { matched: 0, "rd-maintenance-missing": 0, "rd-maintenance-mismatch": 0, "location-unmatched": 0, "mpn-unmatched": 0, "missing-mpn": 0, ambiguous: 0 };
+  return { matched: 0, "rd-maintenance-missing": 0, "rd-maintenance-mismatch": 0, "location-unmatched": 0, "mpn-unmatched": 0, "missing-mpn": 0, "tpn-missing": 0, ambiguous: 0 };
 }
 
 export function mapCustomerBom(items: BomItem[], records: CustomerBomRecord[]): CustomerMappingResult {
-  const locationCandidates = records.map((record) => items
-    .map((item, index) => ({ item, index }))
-    .filter(({ item }) => record.positions.length > 0 && positionKey(item.positions) === positionKey(record.positions)));
-  const passingCandidates = locationCandidates.map((candidates, recordIndex) =>
-    candidates.filter(({ item }) => allCompanyMpnsMatch(item, records[recordIndex])),
-  );
-  const companyPassingCounts = new Map<number, number>();
-  passingCandidates.forEach((candidates) => candidates.forEach(({ index }) =>
-    companyPassingCounts.set(index, (companyPassingCounts.get(index) ?? 0) + 1),
-  ));
+  const alternatives = items.flatMap((item, itemIndex) => item.alternatives.map((alternative, alternativeIndex) => ({
+    item,
+    itemIndex,
+    alternative,
+    alternativeIndex,
+    mpn: normalizeMpn(alternative.manufacturerPart),
+    locationKey: positionKey(item.positions),
+  })));
+  const matchedRecordsByAlternative = new Map<string, CustomerBomRecord[]>();
+  const alternativeKey = (itemIndex: number, alternativeIndex: number) => `${itemIndex}:${alternativeIndex}`;
 
-  const matchedByCompany = new Map<number, CustomerBomRecord>();
-  const rows = records.map((record, recordIndex): CustomerMappingRow => {
-    const candidates = locationCandidates[recordIndex];
-    const passing = passingCandidates[recordIndex];
-    const hasMissingMpn = candidates.some(({ item }) => companyMpns(item).length === 0) || record.manufacturerParts.length === 0;
-    if (!candidates.length) {
-      return { record, status: "location-unmatched", reason: "找不到 Location 集合完全相同的公司料群。", companyManufacturerParts: [] };
+  const rows = records.map((record): CustomerMappingRow => {
+    const customerMpns = new Set(record.manufacturerParts.map(normalizeMpn).filter(Boolean));
+    const locationKey = positionKey(record.positions);
+    const locationItems = items.filter((item) => locationKey && positionKey(item.positions) === locationKey);
+    const matches = alternatives.filter((candidate) =>
+      locationKey && candidate.locationKey === locationKey && candidate.mpn && customerMpns.has(candidate.mpn));
+    const companyManufacturerParts = unique(locationItems.flatMap(companyMpns));
+    const companyPartNumbers = unique(matches.map(({ alternative }) => alternative.part));
+    const companyRdCustomerPartNumbers = unique(matches.flatMap(({ alternative }) => rdCustomerNumbers(alternative)));
+    const companyItem = matches[0]?.item ?? (locationItems.length === 1 ? locationItems[0] : undefined);
+
+    if (!locationItems.length) {
+      return { record, status: "location-unmatched", reason: "找不到 Location 集合完全相同的公司料群。", companyManufacturerParts: [], companyPartNumbers: [], companyRdCustomerPartNumbers: [] };
     }
-    if (!passing.length) {
-      const candidate = candidates[0]?.item;
+    if (!record.manufacturerParts.length || locationItems.some((item) => companyMpns(item).length === 0)) {
       return {
         record,
-        status: hasMissingMpn ? "missing-mpn" : "mpn-unmatched",
-        reason: hasMissingMpn ? "客戶或公司 MPN 資料不完整。" : "Location 相同，但公司主替料 MPN 未全部完全匹配。",
-        companyItem: candidates.length === 1 ? candidate : undefined,
-        companyManufacturerParts: candidates.flatMap(({ item }) => companyMpns(item)),
+        status: "missing-mpn",
+        reason: "客戶或公司 MPN 資料不完整。",
+        companyItem,
+        companyManufacturerParts,
+        companyPartNumbers,
+        companyRdCustomerPartNumbers,
       };
     }
-    const unique = passing.length === 1 && companyPassingCounts.get(passing[0].index) === 1;
-    if (!unique) {
+    if (!matches.length) {
       return {
         record,
-        status: "ambiguous",
-        reason: "Location 與 MPN 同時命中多個候選，為避免誤配不帶入 TPN。",
-        companyManufacturerParts: passing.flatMap(({ item }) => companyMpns(item)),
+        status: "mpn-unmatched",
+        reason: "Location 相同，但沒有任何公司主料／替料 MPN 完全匹配。",
+        companyItem,
+        companyManufacturerParts,
+        companyPartNumbers,
+        companyRdCustomerPartNumbers,
       };
     }
-    const match = passing[0];
-    matchedByCompany.set(match.index, record);
-    const maintenanceStatus = maintainedStatus(match.item, record);
+
+    matches.forEach((match) => {
+      const key = alternativeKey(match.itemIndex, match.alternativeIndex);
+      matchedRecordsByAlternative.set(key, [...(matchedRecordsByAlternative.get(key) ?? []), record]);
+    });
+    const unmatchedCustomerMpns = [...customerMpns].filter((mpn) => !matches.some((match) => match.mpn === mpn));
+    if (unmatchedCustomerMpns.length) {
+      return {
+        record,
+        status: "mpn-unmatched",
+        reason: `Location 已匹配，但以下客戶 MPN 找不到公司主替料：${unmatchedCustomerMpns.join("、")}。已匹配的料件仍會帶入 TPN。`,
+        companyItem,
+        companyManufacturerParts,
+        companyPartNumbers,
+        companyRdCustomerPartNumbers,
+      };
+    }
+    const customerTpn = record.customerPartNumber.trim().toUpperCase();
+    if (!customerTpn) {
+      return {
+        record,
+        status: "tpn-missing",
+        reason: "客戶 BOM TPN 空白，無法帶入公司主料／替料。",
+        companyItem,
+        companyManufacturerParts,
+        companyPartNumbers,
+        companyRdCustomerPartNumbers,
+      };
+    }
+    const maintenanceStatuses = matches.map(({ alternative }) => maintainedStatus(alternative, [customerTpn]));
+    const maintenanceStatus = maintenanceStatuses.includes("rd-maintenance-missing")
+      ? "rd-maintenance-missing"
+      : maintenanceStatuses.includes("rd-maintenance-mismatch")
+        ? "rd-maintenance-mismatch"
+        : "matched";
     return {
       record,
       status: maintenanceStatus,
       reason: maintenanceStatus === "matched"
-        ? "Location、MPN 與 BOM R欄 TPN 均完全匹配。"
+        ? "Location 與每顆主料／替料 MPN 完全匹配，客戶 TPN 也存在於各料件 BOM R欄。"
         : maintenanceStatus === "rd-maintenance-missing"
-          ? "Location 與 MPN 已匹配，但 BOM R欄沒有維護此 TPN，請 RD 維護。"
-          : "Location 與 MPN 已匹配，但客戶 BOM TPN 不在 BOM R欄清單中，請 RD 確認並維護。",
-      companyItem: match.item,
-      companyManufacturerParts: companyMpns(match.item),
+          ? "Location 與 MPN 已匹配，但至少一顆主料／替料的 BOM R欄沒有維護此 TPN，請 RD 維護。"
+          : "Location 與 MPN 已匹配，但至少一顆主料／替料的 BOM R欄缺少此客戶 TPN，請 RD 確認並維護。",
+      companyItem,
+      companyManufacturerParts,
+      companyPartNumbers,
+      companyRdCustomerPartNumbers,
     };
   });
 
-  const mappedItems = items.map((item, index) => {
-    const matched = matchedByCompany.get(index);
-    if (matched) {
-      const maintenanceStatus = maintainedStatus(item, matched);
-      const reason = maintenanceStatus === "matched"
-        ? "Location、MPN 與 BOM R欄 TPN 完全匹配"
-        : maintenanceStatus === "rd-maintenance-missing"
-          ? "Location 與 MPN 已匹配，但 BOM R欄空白，請 RD 維護"
-          : "Location 與 MPN 已匹配，但 TPN 不在 BOM R欄，請 RD 維護";
-      return { ...item, customerPartNumber: matched.customerPartNumber, customerMappingStatus: maintenanceStatus, customerMappingReason: reason };
+  const alternativeRows: CustomerAlternativeMappingRow[] = alternatives.map((candidate) => {
+    const matchingRecords = matchedRecordsByAlternative.get(alternativeKey(candidate.itemIndex, candidate.alternativeIndex)) ?? [];
+    const customerPartNumbers = unique(matchingRecords.map((record) => record.customerPartNumber.trim().toUpperCase()));
+    const rdPartNumbers = rdCustomerNumbers(candidate.alternative);
+    let status: CustomerAlternativeMappingRow["status"];
+    let reason: string;
+
+    if (!candidate.mpn) {
+      status = "missing-mpn";
+      reason = "公司製造廠商料號空白，無法與客戶 BOM 完全匹配。";
+    } else if (matchingRecords.length && !customerPartNumbers.length) {
+      status = "tpn-missing";
+      reason = "Location 與 MPN 已匹配，但客戶 BOM TPN 空白。";
+    } else if (customerPartNumbers.length) {
+      status = maintainedStatus(candidate.alternative, customerPartNumbers);
+      reason = status === "matched"
+        ? `已依 Location＋MPN 帶入 ${customerPartNumbers.length} 組 TPN，且均存在於此料件 BOM R欄。`
+        : status === "rd-maintenance-missing"
+          ? `已帶入 ${customerPartNumbers.length} 組 TPN，但此料件 BOM R欄空白，請 RD 維護。`
+          : `已帶入 ${customerPartNumbers.length} 組 TPN，但 BOM R欄缺少：${customerPartNumbers.filter((tpn) => !rdPartNumbers.includes(tpn)).join("、")}。`;
+    } else {
+      const sameMpn = records.filter((record) => record.manufacturerParts.map(normalizeMpn).includes(candidate.mpn));
+      const sameLocation = records.filter((record) => positionKey(record.positions) === candidate.locationKey);
+      if (sameMpn.length) {
+        status = "location-unmatched";
+        reason = "MPN 完全相同，但 Location 集合不同；未帶入其他位置的 TPN。";
+      } else if (sameLocation.some((record) => !record.manufacturerParts.length)) {
+        status = "missing-mpn";
+        reason = "Location 相同，但客戶 BOM MPN 空白。";
+      } else {
+        status = "mpn-unmatched";
+        reason = "Location 相同，但客戶 BOM 找不到完全相同的 MPN。";
+      }
     }
-    const sameLocation = records.filter((record) => record.positions.length > 0 && positionKey(record.positions) === positionKey(item.positions));
-    if (!sameLocation.length) {
-      return { ...item, customerPartNumber: undefined, customerMappingStatus: "location-unmatched" as const, customerMappingReason: "客戶 BOM 找不到相同 Location 集合" };
-    }
-    if (!companyMpns(item).length || sameLocation.some((record) => !record.manufacturerParts.length)) {
-      return { ...item, customerPartNumber: undefined, customerMappingStatus: "missing-mpn" as const, customerMappingReason: "客戶或公司 MPN 資料不完整" };
-    }
-    const matchingRows = sameLocation.filter((record) => allCompanyMpnsMatch(item, record));
-    if (matchingRows.length > 1) {
-      return { ...item, customerPartNumber: undefined, customerMappingStatus: "ambiguous" as const, customerMappingReason: "多個客戶 BOM 列同時完全匹配" };
-    }
-    return { ...item, customerPartNumber: undefined, customerMappingStatus: "mpn-unmatched" as const, customerMappingReason: "Location 相同，但 MPN 未完全匹配" };
+    return {
+      itemIndex: candidate.itemIndex,
+      alternativeIndex: candidate.alternativeIndex,
+      role: candidate.alternativeIndex === 0 ? "主料" : "替料",
+      part: candidate.alternative.part,
+      manufacturerPart: candidate.alternative.manufacturerPart,
+      positions: candidate.item.positions,
+      rdCustomerPartNumbers: rdPartNumbers,
+      customerPartNumbers,
+      status,
+      reason,
+    };
+  });
+
+  const statusPriority: Array<CustomerAlternativeMappingRow["status"]> = ["ambiguous", "tpn-missing", "missing-mpn", "mpn-unmatched", "location-unmatched", "rd-maintenance-mismatch", "rd-maintenance-missing", "matched"];
+  const mappedItems = items.map((item, itemIndex) => {
+    const itemRows = alternativeRows.filter((row) => row.itemIndex === itemIndex);
+    const mappedAlternatives = item.alternatives.map((alternative, alternativeIndex) => {
+      const row = itemRows.find((candidate) => candidate.alternativeIndex === alternativeIndex)!;
+      return {
+        ...alternative,
+        customerPartNumbers: row.customerPartNumbers,
+        customerMappingStatus: row.status,
+        customerMappingReason: row.reason,
+      };
+    });
+    const customerPartNumbers = unique(itemRows.flatMap((row) => row.customerPartNumbers));
+    const customerMappingStatus = statusPriority.find((status) => itemRows.some((row) => row.status === status)) ?? "mpn-unmatched";
+    const customerMappingReason = itemRows.filter((row) => row.status !== "matched").map((row) => `${row.role} ${row.part || row.manufacturerPart}：${row.reason}`).join("；")
+      || `主料與 ${Math.max(0, itemRows.length - 1)} 顆替料均已完成 TPN 對應。`;
+    return {
+      ...item,
+      alternatives: mappedAlternatives,
+      customerPartNumber: customerPartNumbers[0],
+      customerPartNumbers,
+      customerMappingStatus,
+      customerMappingReason,
+    };
   });
 
   const counts = emptyCounts();
-  rows.forEach((row) => { counts[row.status] += 1; });
-  return { items: mappedItems, rows, counts };
+  alternativeRows.forEach((row) => { counts[row.status] += 1; });
+  return { items: mappedItems, rows, alternativeRows, counts };
 }
 
 export function normalizePlacementSide(value: unknown): PlacementSide | undefined {

@@ -655,23 +655,42 @@ function mappingStatusLabel(status: CustomerMappingResult["rows"][number]["statu
     "location-unmatched": "Location 未匹配",
     "mpn-unmatched": "MPN 未匹配",
     "missing-mpn": "MPN 資料不足",
+    "tpn-missing": "客戶 TPN 空白",
     ambiguous: "多重候選",
   }[status];
 }
 
 function CustomerMappingTable({ version, result }: { version: "舊版" | "新版"; result: CustomerMappingResult | null }) {
   if (!result) return <div className="customer-empty">{version}客戶 BOM 尚未匯入</div>;
-  return <div className="customer-table-wrap"><table className="customer-table">
-    <thead><tr><th>狀態</th><th>客戶 TPN</th><th>Location</th><th>客戶 MPN</th><th>公司主替料 MPN</th><th>說明</th></tr></thead>
-    <tbody>{result.rows.map((row) => <tr className={row.status} key={`${version}-${row.record.sourceRow}-${row.record.customerPartNumber}`}>
-      <td><span className={`mapping-status ${row.status}`}>{mappingStatusLabel(row.status)}</span></td>
-      <td><strong>{row.record.customerPartNumber || "—"}</strong><small>Excel 第 {row.record.sourceRow} 列</small></td>
-      <td>{row.record.positions.join("、") || "—"}</td>
-      <td className={row.status === "mpn-unmatched" || row.status === "missing-mpn" ? "mismatch" : ""}>{row.record.manufacturerParts.join("\n") || "—"}</td>
-      <td className={row.status === "mpn-unmatched" || row.status === "missing-mpn" ? "mismatch" : ""}>{row.companyManufacturerParts.join("\n") || "—"}{row.companyItem && <small><b>BOM R欄</b> {row.companyItem.rdCustomerPartNumbers?.join("、") || "空白"}</small>}</td>
-      <td>{row.reason}</td>
-    </tr>)}</tbody>
-  </table></div>;
+  const unmatchedCustomerRows = result.rows.filter((row) => row.status === "location-unmatched" || row.status === "mpn-unmatched" || row.status === "missing-mpn" || row.status === "tpn-missing" || row.status === "ambiguous");
+  return <div className="customer-table-wrap">
+    <div className="customer-table-title"><strong>公司 BOM 主料／替料 TPN 對應</strong><small>每顆料獨立配對；同 MPN 以 Location 集合判斷實際 TPN</small></div>
+    <table className="customer-table alternative-mapping-table">
+      <thead><tr><th>狀態</th><th>角色／公司料號</th><th>公司 MPN</th><th>Location</th><th>客戶 BOM TPN</th><th>BOM R欄 TPN</th><th>說明</th></tr></thead>
+      <tbody>{result.alternativeRows.map((row) => <tr className={row.status} key={`${version}-${row.itemIndex}-${row.alternativeIndex}`}>
+        <td><span className={`mapping-status ${row.status}`}>{mappingStatusLabel(row.status)}</span></td>
+        <td><span className="part-role">{row.role === "主料" ? "主" : "替"}</span><strong>{row.part || "—"}</strong></td>
+        <td className={row.status === "mpn-unmatched" || row.status === "missing-mpn" ? "mismatch" : ""}>{row.manufacturerPart || "—"}</td>
+        <td>{row.positions.join("、") || "—"}</td>
+        <td className={!row.customerPartNumbers.length ? "mismatch" : ""}>{row.customerPartNumbers.join("\n") || "未對應"}</td>
+        <td className={row.status === "rd-maintenance-missing" || row.status === "rd-maintenance-mismatch" ? "mismatch" : ""}>{row.rdCustomerPartNumbers.join("\n") || "空白"}</td>
+        <td>{row.reason}</td>
+      </tr>)}</tbody>
+    </table>
+    {unmatchedCustomerRows.length > 0 && <><div className="customer-table-title warning"><strong>客戶 BOM 未完整對應列</strong><small>下列客戶資料仍有 Location、MPN 或 TPN 問題</small></div>
+      <table className="customer-table customer-source-errors">
+        <thead><tr><th>狀態</th><th>客戶 TPN</th><th>Location</th><th>客戶 MPN</th><th>已命中公司料號</th><th>說明</th></tr></thead>
+        <tbody>{unmatchedCustomerRows.map((row) => <tr className={row.status} key={`${version}-source-${row.record.sourceRow}-${row.record.customerPartNumber}`}>
+          <td><span className={`mapping-status ${row.status}`}>{mappingStatusLabel(row.status)}</span></td>
+          <td><strong>{row.record.customerPartNumber || "—"}</strong><small>Excel 第 {row.record.sourceRow} 列</small></td>
+          <td>{row.record.positions.join("、") || "—"}</td>
+          <td className="mismatch">{row.record.manufacturerParts.join("\n") || "—"}</td>
+          <td>{row.companyPartNumbers.join("\n") || "—"}</td>
+          <td>{row.reason}</td>
+        </tr>)}</tbody>
+      </table>
+    </>}
+  </div>;
 }
 
 function CustomerMappingPanel({ beforeName, afterName, before, after, onBefore, onAfter, onClearBefore, onClearAfter }: {
@@ -682,7 +701,7 @@ function CustomerMappingPanel({ beforeName, afterName, before, after, onBefore, 
   const result = version === "before" ? before : after;
   return <div className="customer-panel">
     <div className="customer-import-bar">
-      <div><strong>客戶 BOM TPN 嚴格對應</strong><small>Location 集合完全相同，且公司每一顆主替料 MPN 都必須逐字匹配</small></div>
+      <div><strong>客戶 BOM TPN 嚴格對應</strong><small>每顆主料／替料 MPN 逐字匹配；同料號以 Location 集合選出正確 TPN，並保留多組 TPN</small></div>
       <div className="customer-files"><SupplementalFileChip label="舊版客戶 BOM" name={beforeName} onClick={onBefore} onClear={onClearBefore} /><SupplementalFileChip label="新版客戶 BOM" name={afterName} onClick={onAfter} onClear={onClearAfter} /></div>
     </div>
     <div className="customer-summary">
@@ -691,7 +710,7 @@ function CustomerMappingPanel({ beforeName, afterName, before, after, onBefore, 
         return <button type="button" className={version === side ? "active" : ""} onClick={() => setVersion(side)} key={side}>
           <strong>{side === "before" ? "舊版" : "新版"}</strong>
           <span className="ok">成功 {current?.counts.matched ?? 0}</span>
-          <span className="bad">需處理 {(current?.rows.length ?? 0) - (current?.counts.matched ?? 0)}</span>
+          <span className="bad">需處理 {(current?.alternativeRows.length ?? 0) - (current?.counts.matched ?? 0)}</span>
         </button>;
       })}
     </div>
@@ -872,21 +891,23 @@ function PartList({ item, changedParts, tone }: { item?: BomItem; changedParts: 
     const changed = changedKeys.has(key);
     return <div className={`part-entry ${changed ? tone : ""}`} key={`${key}-${index}`}>
       <span className="part-role">{index === 0 ? "主" : "替"}</span>
-      <div><strong>{alternative.part || "—"}</strong><small><b>製造廠商料號</b> {alternative.manufacturerPart || "—"}</small><small><b>製造廠商</b> {alternative.manufacturerName || "—"}</small>{index === 0 && <CustomerPartStatus item={item} />}</div>
+      <div><strong>{alternative.part || "—"}</strong><small><b>製造廠商料號</b> {alternative.manufacturerPart || "—"}</small><small><b>製造廠商</b> {alternative.manufacturerName || "—"}</small><CustomerPartStatus alternative={alternative} fallbackStatus={item.customerMappingStatus} fallbackReason={item.customerMappingReason} /></div>
     </div>;
   })}</div>;
 }
 
-function CustomerPartStatus({ item }: { item: BomItem }) {
-  const rdValues = item.rdCustomerPartNumbers ?? item.alternatives.flatMap((alternative) => alternative.rdCustomerPartNumbers ?? []);
-  const uniqueRdValues = [...new Set(rdValues)];
-  if (item.customerMappingStatus === "matched" && item.customerPartNumber) return <>
+function CustomerPartStatus({ alternative, fallbackStatus, fallbackReason }: { alternative: BomAlternative; fallbackStatus?: BomItem["customerMappingStatus"]; fallbackReason?: string }) {
+  const uniqueRdValues = [...new Set(alternative.rdCustomerPartNumbers ?? [])];
+  const mappedTpns = [...new Set(alternative.customerPartNumbers ?? [])];
+  const status = alternative.customerMappingStatus ?? fallbackStatus ?? "not-imported";
+  const reason = alternative.customerMappingReason ?? fallbackReason;
+  if (status === "matched" && mappedTpns.length) return <>
     <small className="customer-part matched"><b>BOM R欄 TPN</b> {uniqueRdValues.join("、") || "—"}</small>
-    <small className="customer-part matched"><b>客戶 BOM TPN 驗證</b> {item.customerPartNumber}・一致</small>
+    <small className="customer-part matched"><b>客戶 BOM TPN</b> {mappedTpns.join("、")}・一致</small>
   </>;
-  if ((item.customerMappingStatus === "rd-maintenance-missing" || item.customerMappingStatus === "rd-maintenance-mismatch") && item.customerPartNumber) return <>
+  if ((status === "rd-maintenance-missing" || status === "rd-maintenance-mismatch") && mappedTpns.length) return <>
     <small className="customer-part rd-warning"><b>BOM R欄 TPN</b> {uniqueRdValues.join("、") || "空白"}</small>
-    <small className="customer-part rd-warning"><b>客戶 BOM TPN 驗證</b> {item.customerPartNumber}・請 RD 維護</small>
+    <small className="customer-part rd-warning" title={reason}><b>客戶 BOM TPN</b> {mappedTpns.join("、")}・請 RD 維護</small>
   </>;
   const labels = {
     "rd-maintenance-missing": "請 RD 維護",
@@ -894,12 +915,15 @@ function CustomerPartStatus({ item }: { item: BomItem }) {
     "location-unmatched": "Location 未匹配",
     "mpn-unmatched": "MPN 未匹配",
     "missing-mpn": "MPN 資料不足",
+    "tpn-missing": "客戶 TPN 空白",
     ambiguous: "多重候選",
     "not-imported": "未匯入",
   } as const;
-  const status = item.customerMappingStatus ?? "not-imported";
   if (status === "matched") return <small className="customer-part missing-mpn"><b>客戶 TPN</b> 配對結果缺少 TPN</small>;
-  return <small className={`customer-part ${status}`} title={item.customerMappingReason}><b>BOM R欄 TPN</b> {uniqueRdValues.join("、") || "空白"}・{labels[status]}</small>;
+  return <>
+    <small className={`customer-part ${status}`} title={reason}><b>BOM R欄 TPN</b> {uniqueRdValues.join("、") || "空白"}</small>
+    <small className={`customer-part ${status}`} title={reason}><b>客戶 BOM TPN</b> {mappedTpns.join("、") || "未對應"}・{labels[status]}</small>
+  </>;
 }
 
 function PositionSummary({ added, removed, replacement, allPositions, onLocate }: { added: string[]; removed: string[]; replacement: string[]; allPositions: string[]; onLocate: (position: string) => void }) {

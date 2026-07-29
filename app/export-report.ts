@@ -124,13 +124,15 @@ function listManufacturers(parts: BomAlternative[]) {
 }
 
 function customerStatusLabel(item: BomDiff["before"] | BomDiff["after"]) {
-  if (item?.customerMappingStatus === "matched") return item.customerPartNumber ? `客戶 BOM TPN ${item.customerPartNumber}・一致` : "客戶 BOM TPN 驗證結果缺少 TPN";
+  const mappedTpns = [...new Set(item?.customerPartNumbers ?? (item?.customerPartNumber ? [item.customerPartNumber] : []))];
+  if (item?.customerMappingStatus === "matched") return mappedTpns.length ? `客戶 BOM TPN ${mappedTpns.join("、")}・一致` : "客戶 BOM TPN 驗證結果缺少 TPN";
   return {
-    "rd-maintenance-missing": `客戶 BOM TPN ${item?.customerPartNumber ?? "—"}・R欄空白，請 RD 維護`,
-    "rd-maintenance-mismatch": `客戶 BOM TPN ${item?.customerPartNumber ?? "—"}・R欄不一致，請 RD 維護`,
+    "rd-maintenance-missing": `客戶 BOM TPN ${mappedTpns.join("、") || "—"}・R欄空白，請 RD 維護`,
+    "rd-maintenance-mismatch": `客戶 BOM TPN ${mappedTpns.join("、") || "—"}・R欄不一致，請 RD 維護`,
     "location-unmatched": "Location 未匹配",
     "mpn-unmatched": "MPN 未匹配",
     "missing-mpn": "MPN 資料不足",
+    "tpn-missing": "客戶 TPN 空白",
     ambiguous: "多重候選",
     "not-imported": "未匯入",
   }[item?.customerMappingStatus ?? "not-imported"];
@@ -605,26 +607,25 @@ async function appendOriginalBom(targetWorkbook: ExcelJS.Workbook, source: Origi
 function appendCustomerMappingSheet(workbook: ExcelJS.Workbook, before?: CustomerMappingResult | null, after?: CustomerMappingResult | null) {
   if (!before && !after) return;
   const sheet = workbook.addWorksheet("客戶 BOM TPN 對應", { properties: { defaultRowHeight: 28 } });
-  const headers = ["版本", "配對狀態", "客戶 BOM TPN", "BOM R欄 TPN", "Location", "客戶製造廠商料號", "公司主替料 MPN", "公司主件料號", "說明", "客戶 BOM 原始列"];
-  styleTitle(sheet, "A1:J1", "客戶 BOM TPN 嚴格對應結果");
+  const headers = ["版本", "配對狀態", "角色", "公司料號", "公司製造廠商料號", "Location", "客戶 BOM TPN", "BOM R欄 TPN", "說明"];
+  styleTitle(sheet, "A1:I1", "客戶 BOM TPN－公司主料／替料逐顆對應結果");
   sheet.getRow(2).values = headers;
   styleHeader(sheet.getRow(2));
   const entries = ([["舊版", before], ["新版", after]] as const).flatMap(([version, result]) =>
-    (result?.rows ?? []).map((row) => ({ version, row })),
+    (result?.alternativeRows ?? []).map((row) => ({ version, row })),
   );
   entries.forEach(({ version, row }, index) => {
     const target = sheet.getRow(index + 3);
     target.values = [
       version,
       row.status === "matched" ? "配對成功" : customerStatusLabel({ customerMappingStatus: row.status } as BomDiff["before"]),
-      row.record.customerPartNumber,
-      row.companyItem?.rdCustomerPartNumbers?.join("\n") ?? "",
-      row.record.positions.join("\n"),
-      row.record.manufacturerParts.join("\n"),
-      row.companyManufacturerParts.join("\n"),
-      row.companyItem?.part ?? "",
+      row.role,
+      row.part,
+      row.manufacturerPart,
+      row.positions.join("\n"),
+      row.customerPartNumbers.join("\n"),
+      row.rdCustomerPartNumbers.join("\n"),
       row.reason,
-      row.record.sourceRow,
     ];
     target.height = 36;
     target.eachCell({ includeEmpty: true }, (cell) => {
@@ -637,21 +638,49 @@ function appendCustomerMappingSheet(workbook: ExcelJS.Workbook, before?: Custome
       target.getCell(2).fill = fill(colors.paleGreen);
       target.getCell(2).font = { name: "Microsoft JhengHei", size: 10, bold: true, color: { argb: colors.green } };
     } else if (row.status === "rd-maintenance-missing" || row.status === "rd-maintenance-mismatch") {
-      [2, 3, 4, 9].forEach((column) => {
+      [2, 7, 8, 9].forEach((column) => {
         target.getCell(column).fill = fill("FFF3DC");
         target.getCell(column).font = { name: "Microsoft JhengHei", size: 10, bold: true, color: { argb: colors.amber } };
       });
     } else {
-      [2, 5, 6].forEach((column) => {
+      [2, 5, 6, 7].forEach((column) => {
         target.getCell(column).fill = fill(row.status === "location-unmatched" ? colors.paleAmber : colors.paleRed);
         target.getCell(column).font = { name: "Microsoft JhengHei", size: 10, bold: true, color: { argb: row.status === "location-unmatched" ? colors.amber : colors.red } };
       });
     }
   });
-  const widths = [10, 18, 20, 22, 26, 32, 32, 20, 45, 12];
+  const widths = [10, 18, 10, 22, 30, 26, 28, 28, 68];
   widths.forEach((width, index) => { sheet.getColumn(index + 1).width = width; });
   sheet.views = [{ state: "frozen", ySplit: 2, showGridLines: false }];
-  sheet.autoFilter = { from: "A2", to: `J${Math.max(2, entries.length + 2)}` };
+  sheet.autoFilter = { from: "A2", to: `I${Math.max(2, entries.length + 2)}` };
+
+  const unmatchedEntries = ([["舊版", before], ["新版", after]] as const).flatMap(([version, result]) =>
+    (result?.rows ?? [])
+      .filter((row) => ["location-unmatched", "mpn-unmatched", "missing-mpn", "tpn-missing", "ambiguous"].includes(row.status))
+      .map((row) => ({ version, row })),
+  );
+  if (!unmatchedEntries.length) return;
+  const unmatched = workbook.addWorksheet("客戶 BOM 未對應列", { properties: { defaultRowHeight: 28 } });
+  styleTitle(unmatched, "A1:H1", "客戶 BOM 未完整對應資料");
+  unmatched.getRow(2).values = ["版本", "狀態", "客戶 BOM TPN", "Location", "客戶製造廠商料號", "已命中公司料號", "說明", "客戶 BOM 原始列"];
+  styleHeader(unmatched.getRow(2));
+  unmatchedEntries.forEach(({ version, row }, index) => {
+    const target = unmatched.getRow(index + 3);
+    target.values = [version, customerStatusLabel({ customerMappingStatus: row.status } as BomDiff["before"]), row.record.customerPartNumber, row.record.positions.join("\n"), row.record.manufacturerParts.join("\n"), row.companyPartNumbers.join("\n"), row.reason, row.record.sourceRow];
+    target.height = 38;
+    target.eachCell({ includeEmpty: true }, (cell) => {
+      cell.font = { name: "Microsoft JhengHei", size: 10, color: { argb: "344054" } };
+      cell.alignment = { vertical: "middle", wrapText: true };
+      cell.border = border();
+    });
+    [2, 3, 4, 5].forEach((column) => {
+      target.getCell(column).fill = fill(colors.paleRed);
+      target.getCell(column).font = { name: "Microsoft JhengHei", size: 10, bold: true, color: { argb: colors.red } };
+    });
+  });
+  [10, 18, 26, 28, 34, 28, 68, 16].forEach((width, index) => { unmatched.getColumn(index + 1).width = width; });
+  unmatched.views = [{ state: "frozen", ySplit: 2, showGridLines: false }];
+  unmatched.autoFilter = { from: "A2", to: `H${unmatchedEntries.length + 2}` };
 }
 
 function appendMvaSheet(workbook: ExcelJS.Workbook, before?: MvaSummary | null, after?: MvaSummary | null) {

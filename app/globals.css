@@ -252,7 +252,7 @@ tbody tr:nth-last-child(-n+2) .confidence-popover:hover .confidence-tooltip, tbo
 .part-entry small.customer-part { margin-top: 1px; padding-top: 3px; border-top: 1px dashed #e0e5ec; }
 .part-entry small.customer-part.matched { color: #157a57; }
 .part-entry small.customer-part.rd-warning { color: #966117; background: #fff8e8; font-weight: 800; }
-.part-entry small.customer-part.mpn-unmatched, .part-entry small.customer-part.missing-mpn, .part-entry small.customer-part.ambiguous { color: #b14949; font-weight: 800; }
+.part-entry small.customer-part.mpn-unmatched, .part-entry small.customer-part.missing-mpn, .part-entry small.customer-part.tpn-missing, .part-entry small.customer-part.ambiguous { color: #b14949; font-weight: 800; }
 .part-entry small.customer-part.location-unmatched { color: #9a651b; font-weight: 800; }
 .part-entry small.customer-part.not-imported { color: #9aa2af; }
 .position-list { display: flex; align-items: flex-start; gap: 4px; flex-wrap: wrap; }
@@ -414,18 +414,23 @@ tbody tr:nth-last-child(-n+2) .confidence-popover:hover .confidence-tooltip, tbo
 .customer-summary button strong { margin-right: auto; font-size: 11px; }
 .customer-summary button span { font-size: 9px; font-weight: 700; }.customer-summary .ok { color: #16835d; }.customer-summary .bad { color: #b14949; }
 .customer-table-wrap { max-height: 58vh; overflow: auto; }
+.customer-table-title { padding: 12px 14px 9px; display: flex; align-items: baseline; gap: 10px; border-bottom: 1px solid #e8ecf1; background: #f8fafc; }
+.customer-table-title strong { color: #344054; font-size: 12px; }
+.customer-table-title small { color: #7d8797; font-size: 10px; }
+.customer-table-title.warning { margin-top: 18px; background: #fff8eb; }
+.customer-table-title.warning strong { color: #966117; }
 .customer-table { min-width: 1120px; table-layout: fixed; }
 .customer-table th:nth-child(1) { width: 125px; }.customer-table th:nth-child(2) { width: 150px; }.customer-table th:nth-child(3) { width: 190px; }.customer-table th:nth-child(4), .customer-table th:nth-child(5) { width: 220px; }.customer-table th:nth-child(6) { width: auto; }
 .customer-table td { white-space: pre-line; vertical-align: top; font-family: var(--font-geist-mono); font-size: 10px; line-height: 1.5; }
 .customer-table td strong { color: #344054; font-size: 11px; }.customer-table td small { display: block; margin-top: 3px; color: #929aa7; font-family: Arial, "Noto Sans TC", sans-serif; }
 .customer-table tr.rd-maintenance-missing td, .customer-table tr.rd-maintenance-mismatch td { background: #fffaf0; }
-.customer-table tr.mpn-unmatched td, .customer-table tr.missing-mpn td, .customer-table tr.ambiguous td { background: #fff8f8; }
+.customer-table tr.mpn-unmatched td, .customer-table tr.missing-mpn td, .customer-table tr.tpn-missing td, .customer-table tr.ambiguous td { background: #fff8f8; }
 .customer-table td.mismatch { color: #ad3f3f; background: #fff0f0 !important; font-weight: 700; }
 .mapping-status { display: inline-block; padding: 4px 6px; border-radius: 4px; font-family: Arial, "Noto Sans TC", sans-serif; font-size: 9px; font-weight: 800; white-space: nowrap; }
 .mapping-status.matched { color: #147a56; background: #e8f7f0; }
 .mapping-status.rd-maintenance-missing, .mapping-status.rd-maintenance-mismatch { color: #966117; background: #fff3dc; }
 .mapping-status.location-unmatched { color: #966117; background: #fff3dc; }
-.mapping-status.mpn-unmatched, .mapping-status.missing-mpn, .mapping-status.ambiguous { color: #ad3f3f; background: #ffe8e8; }
+.mapping-status.mpn-unmatched, .mapping-status.missing-mpn, .mapping-status.tpn-missing, .mapping-status.ambiguous { color: #ad3f3f; background: #ffe8e8; }
 .customer-empty { padding: 70px 20px; color: #8b94a3; text-align: center; }
 .primary:disabled { cursor: not-allowed; opacity: .45; }
 .session-dialog { width: min(650px, 100%); }.session-list { max-height: 430px; overflow: auto; padding: 8px 20px 18px; }.session-list article { padding: 12px 2px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #edf0f4; color: #5573a8; }.session-list article > div { display: flex; flex-direction: column; gap: 4px; }.session-list strong { color: #344054; font-size: 11px; }.session-list small { color: #8b94a3; font-size: 9px; }
