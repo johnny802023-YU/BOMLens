@@ -47,6 +47,13 @@ export function clearInactivePdfCache() {
   [...pdfIndexCache.entries()].forEach(([file, entry]) => { if (entry.listeners.size === 0) disposeEntry(file, entry); });
 }
 
+export type PdfReportSource = {
+  document: PDFDocumentProxy;
+  referenceIndex: PdfReferenceIndex;
+  totalPages: number;
+  status: Exclude<IndexStatus, "indexing">;
+};
+
 function getIndexEntry(file: File) {
   const existing = pdfIndexCache.get(file);
   if (existing) { existing.lastUsed = Date.now(); return existing; }
@@ -111,6 +118,33 @@ async function startProgressiveIndex(file: File, entry: IndexEntry) {
   } catch {
     if (!entry.cancelled) { entry.status = "error"; notify(entry); }
   }
+}
+
+export async function getPdfReportSource(file: File, onProgress?: (processedPages: number, totalPages: number) => void): Promise<PdfReportSource> {
+  const entry = getIndexEntry(file);
+  onProgress?.(entry.processedPages, entry.totalPages);
+  void startProgressiveIndex(file, entry);
+  if (entry.status === "indexing") {
+    await new Promise<void>((resolve) => {
+      const update = () => {
+        onProgress?.(entry.processedPages, entry.totalPages);
+        if (entry.status !== "indexing") {
+          entry.listeners.delete(update);
+          resolve();
+        }
+      };
+      entry.listeners.add(update);
+      update();
+    });
+  }
+  if (!entry.document || entry.status === "error") throw new Error("PDF 讀取或索引建立失敗");
+  entry.lastUsed = Date.now();
+  return {
+    document: entry.document,
+    referenceIndex: new Map(entry.referenceIndex),
+    totalPages: entry.totalPages,
+    status: entry.status,
+  };
 }
 
 export function PdfSchematicViewer({ file, target, sideLabel, side, scale, syncEnabled, syncState, onScaleChange, onSyncScroll }: { file: File; target: string; sideLabel: string; side: PdfViewerSide; scale: number; syncEnabled: boolean; syncState: PdfScrollSync; onScaleChange: (side: PdfViewerSide, scale: number) => void; onSyncScroll: (side: PdfViewerSide, x: number, y: number) => void }) {

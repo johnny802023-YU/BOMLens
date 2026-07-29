@@ -4,6 +4,7 @@ export type BomAlternative = {
   manufacturerName?: string;
   description: string;
   spec: string;
+  rdCustomerPartNumbers?: string[];
 };
 
 export type BomStructureKind = "root69" | "vb-t" | "vb-d" | "board60" | "pcb" | "flat";
@@ -29,6 +30,10 @@ export type BomItem = {
   structureKind?: BomStructureKind;
   structurePath?: string[];
   structureKey?: string;
+  customerPartNumber?: string;
+  customerMappingStatus?: "matched" | "rd-maintenance-missing" | "rd-maintenance-mismatch" | "location-unmatched" | "mpn-unmatched" | "missing-mpn" | "ambiguous" | "not-imported";
+  customerMappingReason?: string;
+  rdCustomerPartNumbers?: string[];
 };
 
 export type DiffKind = "added" | "removed" | "changed" | "same";
@@ -56,7 +61,7 @@ export type BomDiff = {
   needsReview: boolean;
 };
 
-export type CompanyColumnKey = "ref" | "part" | "qty" | "positions" | "description" | "spec" | "manufacturerName" | "manufacturerPart";
+export type CompanyColumnKey = "ref" | "part" | "qty" | "positions" | "description" | "spec" | "manufacturerName" | "manufacturerPart" | "customerPartNumbers";
 export type CompanyColumnMapping = Partial<Record<CompanyColumnKey, number>>;
 export type ImportIssue = { severity: "error" | "warning"; code: string; message: string; rows?: number[] };
 export type ImportAudit = {
@@ -78,6 +83,7 @@ const aliases = {
   description: ["description", "desc", "comment", "item description", "說明", "描述", "品名"],
   qty: ["qty", "quantity", "count", "數量", "用量", "組成用量"],
   positions: ["placement", "placements", "location", "locations", "插件位置", "位置"],
+  customerPartNumbers: ["customer part number", "customer pn", "customer tpn", "tpn", "客戶料號", "客戶 tpn", "對應客戶料號"],
 };
 
 type CompanyColumns = {
@@ -89,6 +95,7 @@ type CompanyColumns = {
   spec?: number;
   manufacturerName?: number;
   manufacturerPart?: number;
+  customerPartNumbers?: number;
 };
 
 export const companyColumnLabels: Record<CompanyColumnKey, string> = {
@@ -100,6 +107,7 @@ export const companyColumnLabels: Record<CompanyColumnKey, string> = {
   spec: "規格",
   manufacturerName: "製造廠商",
   manufacturerPart: "製造廠商料號",
+  customerPartNumbers: "TPN／對應客戶料號（R欄）",
 };
 
 export const requiredCompanyColumns: CompanyColumnKey[] = ["ref", "part", "qty", "positions"];
@@ -113,6 +121,7 @@ const companyHeaderAliases = {
   spec: ["規格", "數值", "值", "spec", "specification", "value"],
   manufacturerName: ["製造廠商", "11製造廠商", "製造商名稱", "製造商", "manufacturer name", "manufacturer", "mfr"],
   manufacturerPart: ["製造廠商料號", "16製造廠商料號", "製造商料號", "製造商型號", "manufacturer part number", "mpn"],
+  customerPartNumbers: ["對應客戶料號", "客戶料號", "客戶 tpn", "customer part number", "customer pn", "customer tpn", "tpn"],
 };
 
 function text(value: unknown) {
@@ -143,7 +152,7 @@ export function bomProcessKind(item?: BomItem): BomProcessKind | undefined {
 }
 
 export function bomDiffDisplayFields(diff: BomDiff) {
-  const fields = [...diff.fields];
+  const fields = diff.fields.map((field) => field === "客戶料號差異" ? "TPN 差異" : field);
   if (diff.processChange) {
     const index = fields.indexOf("製程別放置異常");
     const label = `製程別放置異常（${diff.processChange.before} → ${diff.processChange.after}）`;
@@ -180,8 +189,15 @@ export function parseQuantity(value: unknown) {
 
 export function parsePositions(value: unknown) {
   return [...new Set(text(value)
-    .split(/[,，;；\s]+/)
+    .split(/[|,，;；\s]+/)
     .map((position) => position.trim().toUpperCase())
+    .filter(Boolean))];
+}
+
+export function parseCustomerPartNumbers(value: unknown) {
+  return [...new Set(text(value)
+    .split(/[|,，;；\r\n]+/)
+    .map((partNumber) => partNumber.trim().toUpperCase())
     .filter(Boolean))];
 }
 
@@ -208,6 +224,7 @@ export function detectCompanyColumns(headerRow: unknown[]): CompanyColumnMapping
     spec: optionalColumn(companyHeaderAliases.spec),
     manufacturerName: optionalColumn(companyHeaderAliases.manufacturerName),
     manufacturerPart: optionalColumn(companyHeaderAliases.manufacturerPart),
+    customerPartNumbers: optionalColumn(companyHeaderAliases.customerPartNumbers),
   };
 }
 
@@ -261,6 +278,7 @@ export function parseCompanyBomMatrix(matrix: unknown[][], headerIndex = findCom
     const positions = parsePositions(cell(row, columns.positions));
     const manufacturerName = text(cell(row, columns.manufacturerName));
     const manufacturerPart = text(cell(row, columns.manufacturerPart));
+    const rdCustomerPartNumbers = parseCustomerPartNumbers(cell(row, columns.customerPartNumbers));
 
     if (!part && !manufacturerPart && !positions.length && !rawQuantity) continue;
 
@@ -300,10 +318,13 @@ export function parseCompanyBomMatrix(matrix: unknown[][], headerIndex = findCom
     if (!currentGroup) continue;
 
     if (part || manufacturerPart) {
-      const alternative = { part, manufacturerPart, manufacturerName, description, spec };
+      const alternative = { part, manufacturerPart, manufacturerName, description, spec, rdCustomerPartNumbers };
       const alternativeKey = altKey(alternative);
-      if (!currentGroup.alternatives.some((candidate) => altKey(candidate) === alternativeKey)) {
+      const existingAlternative = currentGroup.alternatives.find((candidate) => altKey(candidate) === alternativeKey);
+      if (!existingAlternative) {
         currentGroup.alternatives.push(alternative);
+      } else {
+        existingAlternative.rdCustomerPartNumbers = [...new Set([...(existingAlternative.rdCustomerPartNumbers ?? []), ...rdCustomerPartNumbers])];
       }
     }
     positions.forEach((position) => currentGroup.positions.add(position));
@@ -313,7 +334,8 @@ export function parseCompanyBomMatrix(matrix: unknown[][], headerIndex = findCom
 
   return groups.map((group) => {
     const positions = [...group.positions].sort(naturalSort);
-    const first = group.alternatives[0] ?? { part: "", manufacturerPart: "", manufacturerName: "", description: "", spec: "" };
+    const first = group.alternatives[0] ?? { part: "", manufacturerPart: "", manufacturerName: "", description: "", spec: "", rdCustomerPartNumbers: [] };
+    const rdCustomerPartNumbers = [...new Set(group.alternatives.flatMap((alternative) => alternative.rdCustomerPartNumbers ?? []))];
     return {
       ref: group.ref,
       part: first.part,
@@ -329,6 +351,7 @@ export function parseCompanyBomMatrix(matrix: unknown[][], headerIndex = findCom
       structureKind: group.structureKind,
       structurePath: group.structurePath,
       structureKey: group.structureKey,
+      rdCustomerPartNumbers,
     };
   });
 }
@@ -476,6 +499,12 @@ export function compareBom(before: BomItem[], after: BomItem[]): BomDiff[] {
 
     let fields = compactFields(addedParts, removedParts, addedPositions, removedPositions, true, true);
     const quantityChanged = a.qty !== b.qty;
+    const customerPartNumbersChanged = !overlapStats(
+      a.rdCustomerPartNumbers ?? a.alternatives.flatMap((alternative) => alternative.rdCustomerPartNumbers ?? []),
+      b.rdCustomerPartNumbers ?? b.alternatives.flatMap((alternative) => alternative.rdCustomerPartNumbers ?? []),
+      normalizeValue,
+    ).exact;
+    if (customerPartNumbersChanged) fields.push("客戶料號差異");
     if (processChange) fields.push("製程別放置異常");
     if (replacementPositions.length) {
       fields = fields.filter((field) => field !== "新增替料" && field !== "刪除替料");
@@ -491,7 +520,7 @@ export function compareBom(before: BomItem[], after: BomItem[]): BomDiff[] {
       && addedParts.length === 0
       && removedParts.length === 0
       && !quantityChanged;
-    if (positionRelocated || processChange) {
+    if (positionRelocated || processChange || customerPartNumbersChanged) {
       categories.push("changed");
     } else {
       if (addedParts.length || addedPositions.length) categories.push("added");
@@ -512,7 +541,7 @@ export function compareBom(before: BomItem[], after: BomItem[]): BomDiff[] {
         ? "substituteAdded"
         : removedParts.length > 0
           ? "substituteRemoved"
-          : addedPositions.length > 0 || removedPositions.length > 0 || quantityChanged
+          : addedPositions.length > 0 || removedPositions.length > 0 || quantityChanged || customerPartNumbersChanged
             ? "positionChanged"
             : "same";
     return {

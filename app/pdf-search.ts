@@ -130,5 +130,8 @@ export function mergeReferenceIndex(target: PdfReferenceIndex, source: PdfRefere
 }
 
 export function lookupReferenceHits(index: PdfReferenceIndex, target: string) {
-  return index.get(normalizeReference(target)) ?? [];
+  const normalized = normalizeReference(target);
+  const hits = index.get(normalized) ?? [];
+  const exactHits = hits.filter((hit) => normalizeReference(hit.text) === normalized);
+  return exactHits.length ? exactHits : hits;
 }
