@@ -142,6 +142,13 @@ function customerPartValue(item: BomDiff["before"] | BomDiff["after"]) {
   return [...new Set(item?.rdCustomerPartNumbers ?? item?.alternatives.flatMap((alternative) => alternative.rdCustomerPartNumbers ?? []) ?? [])].join("\n");
 }
 
+function summaryPartTpnValue(part: BomAlternative | undefined, customerBomMapped: boolean) {
+  if (!part) return "";
+  const values = customerBomMapped ? part.customerPartNumbers ?? [] : part.rdCustomerPartNumbers ?? [];
+  const uniqueValues = [...new Set(values.map((value) => value.trim().toUpperCase()).filter(Boolean))];
+  return uniqueValues.join("\n") || (customerBomMapped ? "未對應" : "空白");
+}
+
 function primaryLabel(diff: BomDiff) {
   if (diff.primaryType === "componentAdded" || diff.primaryType === "substituteAdded") return "新增";
   if (diff.primaryType === "componentRemoved" || diff.primaryType === "substituteRemoved") return "刪除";
@@ -438,6 +445,7 @@ function writeSummaryDiffRows(
   diff: BomDiff,
   section: ExportSection,
   striped: boolean,
+  customerBomMapped: { before: boolean; after: boolean },
 ) {
   const beforeParts = diff.before?.alternatives ?? [];
   const afterParts = diff.after?.alternatives ?? [];
@@ -481,11 +489,11 @@ function writeSummaryDiffRows(
     partRow.getCell(9).value = beforePart ? partLabel(beforePart) : index === 0 ? "—" : "";
     partRow.getCell(10).value = beforePart?.manufacturerPart ?? "";
     partRow.getCell(11).value = beforePart?.manufacturerName ?? "";
-    partRow.getCell(12).value = index === 0 ? customerPartValue(diff.before) || "空白" : "";
+    partRow.getCell(12).value = summaryPartTpnValue(beforePart, customerBomMapped.before);
     partRow.getCell(14).value = afterPart ? partLabel(afterPart) : index === 0 ? "—" : "";
     partRow.getCell(15).value = afterPart?.manufacturerPart ?? "";
     partRow.getCell(16).value = afterPart?.manufacturerName ?? "";
-    partRow.getCell(17).value = index === 0 ? customerPartValue(diff.after) || "空白" : "";
+    partRow.getCell(17).value = summaryPartTpnValue(afterPart, customerBomMapped.after);
     [9, 10, 11, 12].forEach((column) => { partRow.getCell(column).fill = fill(colors.paleOldVersion); });
     [14, 15, 16, 17].forEach((column) => { partRow.getCell(column).fill = fill(colors.paleNewVersion); });
     partRow.getCell(9).font = { name: "Microsoft JhengHei", size: 10, bold: index === 0, color: { argb: "344054" } };
@@ -765,6 +773,10 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
 
   styleSummaryHeaderRow(summarySheet, 7, summaryColumnGroups, colors.navy);
   styleSummaryHeaderRow(summarySheet, 8, summarySubHeaders, colors.blue);
+  const summaryCustomerBomMapped = {
+    before: Boolean(context.customerBefore),
+    after: Boolean(context.customerAfter),
+  };
   let summaryRow = 9;
   const summaryDetailRows: number[] = [];
   exportSectionOrder.forEach((section) => {
@@ -774,7 +786,7 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
     if (sectionDiffs.length) {
       sectionDiffs.forEach((diff, index) => {
         const firstDetailRow = summaryRow;
-        summaryRow = writeSummaryDiffRows(summarySheet, summaryRow, diff, section, index % 2 === 1);
+        summaryRow = writeSummaryDiffRows(summarySheet, summaryRow, diff, section, index % 2 === 1, summaryCustomerBomMapped);
         for (let rowNumber = firstDetailRow; rowNumber < summaryRow; rowNumber += 1) summaryDetailRows.push(rowNumber);
       });
     } else {

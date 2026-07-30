@@ -999,6 +999,46 @@ test("detects customer BOM defaults and maps reordered location sets with exact 
   assert.equal(result.items[0].customerMappingStatus, "matched");
 });
 
+test("splits virtual customer TPN MPN lists separated by double tildes", () => {
+  const header = ["PartNumber", "ReferenceDesignator", "MfgPNos"];
+  const records = parseCustomerBomMatrix([
+    header,
+    [
+      "1125327-00-A",
+      "C167",
+      "HMJ107BB7104KAHT~~MCJCH168BB7104KTPA01~~GCJ188R72A104KA01D",
+    ],
+  ], 0, detectCustomerColumns(header));
+  assert.deepEqual(records[0].manufacturerParts, [
+    "HMJ107BB7104KAHT",
+    "MCJCH168BB7104KTPA01",
+    "GCJ188R72A104KA01D",
+  ]);
+
+  const company = [{
+    ref: "001",
+    part: "1A30-04CT0ZY",
+    manufacturerPart: "HMJ107BB7104KAHT",
+    manufacturerName: "",
+    value: "",
+    description: "",
+    qty: 1,
+    positions: ["C167"],
+    alternatives: [
+      { part: "1A30-04CT0ZY", manufacturerPart: "HMJ107BB7104KAHT", description: "", spec: "", rdCustomerPartNumbers: ["1125327-00-A"] },
+      { part: "1A30-04CT1ZY", manufacturerPart: "MCJCH168BB7104KTPA01", description: "", spec: "", rdCustomerPartNumbers: ["1125327-00-A"] },
+      { part: "1A30-04CC0ZY", manufacturerPart: "GCJ188R72A104KA01D", description: "", spec: "", rdCustomerPartNumbers: ["1125327-00-A"] },
+    ],
+  }];
+  const result = mapCustomerBom(company, records);
+  assert.equal(result.rows[0].status, "matched");
+  assert.equal(result.counts.matched, 3);
+  assert.deepEqual(
+    result.items[0].alternatives.map((alternative) => alternative.customerPartNumbers),
+    [["1125327-00-A"], ["1125327-00-A"], ["1125327-00-A"]],
+  );
+});
+
 test("detects TPN as the customer BOM part number header", () => {
   assert.deepEqual(
     detectCustomerColumns(["Level", "TPN", "MfgPNos", "ReferenceDesignator"]),
@@ -1149,4 +1189,38 @@ test("exports customer mapping statuses and MVA details to Excel and HTML", asyn
   assert.match(html, /CUST-001/);
   assert.match(html, /MVA 製程顆數/);
   assert.match(html, /SMT Top/);
+});
+
+test("shows a TPN for every summary part and uses mapped customer TPNs after customer BOM import", async () => {
+  const company = [{
+    ref: "001",
+    part: "MAIN",
+    manufacturerPart: "MAIN-MPN",
+    manufacturerName: "MAKER-A",
+    value: "",
+    description: "",
+    qty: 1,
+    positions: ["U1"],
+    alternatives: [
+      { part: "MAIN", manufacturerPart: "MAIN-MPN", manufacturerName: "MAKER-A", description: "", spec: "", rdCustomerPartNumbers: ["RD-MAIN"] },
+      { part: "ALT", manufacturerPart: "ALT-MPN", manufacturerName: "MAKER-B", description: "", spec: "", rdCustomerPartNumbers: ["RD-ALT"] },
+    ],
+  }];
+  const customer = mapCustomerBom(company, [
+    { customerPartNumber: "CUSTOMER-MAIN", manufacturerParts: ["MAIN-MPN"], positions: ["U1"], sourceRow: 2 },
+    { customerPartNumber: "CUSTOMER-ALT", manufacturerParts: ["ALT-MPN"], positions: ["U1"], sourceRow: 3 },
+  ]);
+  const { buildBomReport } = await import("../app/export-report.ts");
+
+  const mappedWorkbook = buildBomReport(compareBom([], customer.items), "before.xlsx", "after.xlsx", { customerAfter: customer });
+  const mappedSummary = mappedWorkbook.getWorksheet("差異摘要");
+  assert.equal(mappedSummary.getCell("N10").value, "MAIN");
+  assert.equal(mappedSummary.getCell("Q10").value, "CUSTOMER-MAIN");
+  assert.equal(mappedSummary.getCell("N11").value, "ALT");
+  assert.equal(mappedSummary.getCell("Q11").value, "CUSTOMER-ALT");
+
+  const originalWorkbook = buildBomReport(compareBom([], company), "before.xlsx", "after.xlsx");
+  const originalSummary = originalWorkbook.getWorksheet("差異摘要");
+  assert.equal(originalSummary.getCell("Q10").value, "RD-MAIN");
+  assert.equal(originalSummary.getCell("Q11").value, "RD-ALT");
 });

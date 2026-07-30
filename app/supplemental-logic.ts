@@ -166,7 +166,7 @@ export function normalizeMpn(value: unknown) {
 
 export function parseCustomerMpns(value: unknown) {
   return [...new Set(text(value)
-    .split(/[|,，;；\r\n]+/)
+    .split(/[|,，;；\r\n]+|~{2,}|～{2,}/)
     .map(normalizeMpn)
     .filter(Boolean))];
 }
