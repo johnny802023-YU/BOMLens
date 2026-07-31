@@ -56,11 +56,14 @@ function customerHtml(item?: BomDiff["before"]) {
   return item.alternatives.map((alternative, index) => {
     const rdValues = [...new Set(alternative.rdCustomerPartNumbers ?? [])];
     const mappedTpns = [...new Set(alternative.customerPartNumbers ?? [])];
+    const associationEvidence = [...new Set(alternative.customerAssociationEvidence ?? [])];
     const status = alternative.customerMappingStatus ?? item.customerMappingStatus ?? "not-imported";
     const label = {
       matched: "一致",
       "rd-maintenance-missing": "R欄空白，請 RD 維護",
       "rd-maintenance-mismatch": "R欄缺少 TPN，請 RD 維護",
+      "tpn-association-mismatch": "S欄 MPN 關聯不一致",
+      "tpn-association-invalid": "R／S 欄資料待確認",
       "location-unmatched": "Location 未匹配",
       "mpn-unmatched": "MPN 未匹配",
       "missing-mpn": "MPN 資料不足",
@@ -68,8 +71,8 @@ function customerHtml(item?: BomDiff["before"]) {
       ambiguous: "多重候選",
       "not-imported": "未匯入",
     }[status];
-    const tone = status === "matched" ? "matched" : status === "rd-maintenance-missing" || status === "rd-maintenance-mismatch" ? "rd-warning" : "unmatched";
-    return `<small class="customer ${tone}"><b>${index === 0 ? "主料" : "替料"} R欄 TPN</b> ${escapeHtml(rdValues.join("、") || "空白")}<br><b>客戶 BOM TPN</b> ${escapeHtml(mappedTpns.join("、") || "未對應")}・${escapeHtml(label)}</small>`;
+    const tone = status === "matched" ? "matched" : status === "rd-maintenance-missing" || status === "rd-maintenance-mismatch" || status === "tpn-association-invalid" ? "rd-warning" : "unmatched";
+    return `<small class="customer ${tone}"><b>${index === 0 ? "主料" : "替料"} R欄 TPN</b> ${escapeHtml(rdValues.join("、") || "空白")}<br><b>客戶 BOM TPN</b> ${escapeHtml(mappedTpns.join("、") || "未對應")}・${escapeHtml(label)}${associationEvidence.length ? `<br><b>S欄關聯</b> ${escapeHtml(associationEvidence.join("；"))}` : ""}</small>`;
   }).join("");
 }
 
@@ -77,6 +80,8 @@ function mappingStatusText(status: string) {
   return status === "matched" ? "配對成功"
     : status === "rd-maintenance-missing" ? "請 RD 維護"
       : status === "rd-maintenance-mismatch" ? "R欄料號不一致"
+        : status === "tpn-association-mismatch" ? "TPN／MPN 不一致"
+          : status === "tpn-association-invalid" ? "R／S 資料待確認"
         : status === "location-unmatched" ? "Location 未匹配"
           : status === "mpn-unmatched" ? "MPN 未匹配"
             : status === "missing-mpn" ? "MPN 資料不足"
@@ -114,15 +119,15 @@ export function buildBomHtmlReport(diffs: BomDiff[], beforeName: string, afterNa
   const auditSection = auditRows ? `<section><h2>匯入警告</h2><div class="table-wrap"><table><thead><tr><th>版本</th><th>檔案</th><th>類型</th><th>內容</th><th>原始列</th></tr></thead><tbody>${auditRows}</tbody></table></div></section>` : "";
   const customerRows = ([["舊版", context.customerBefore], ["新版", context.customerAfter]] as const).flatMap(([version, result]) =>
     (result?.alternativeRows ?? []).map((row) => {
-      const maintenance = row.status === "rd-maintenance-missing" || row.status === "rd-maintenance-mismatch";
-      return `<tr class="${row.status === "matched" ? "" : maintenance ? "mapping-warning" : "mapping-error"}"><td>${version}</td><td><span class="type ${row.status === "matched" ? "added" : maintenance || row.status === "location-unmatched" ? "replacement" : "removed"}">${escapeHtml(mappingStatusText(row.status))}</span></td><td>${escapeHtml(row.role)}</td><td>${escapeHtml(row.part || "—")}</td><td>${escapeHtml(row.manufacturerPart || "—")}</td><td>${joinValues(row.positions)}</td><td>${joinValues(row.customerPartNumbers)}</td><td>${joinValues(row.rdCustomerPartNumbers)}</td><td>${escapeHtml(row.reason)}</td></tr>`;
+      const maintenance = row.status === "rd-maintenance-missing" || row.status === "rd-maintenance-mismatch" || row.status === "tpn-association-invalid";
+      return `<tr class="${row.status === "matched" ? "" : maintenance ? "mapping-warning" : "mapping-error"}"><td>${version}</td><td><span class="type ${row.status === "matched" ? "added" : maintenance || row.status === "location-unmatched" ? "replacement" : "removed"}">${escapeHtml(mappingStatusText(row.status))}</span></td><td>${escapeHtml(row.role)}</td><td>${escapeHtml(row.part || "—")}</td><td>${escapeHtml(row.manufacturerPart || "—")}</td><td>${joinValues(row.positions)}</td><td>${joinValues(row.customerPartNumbers)}</td><td>${joinValues(row.rdCustomerPartNumbers)}</td><td>${joinValues(row.customerAssociationEvidence)}</td><td>${escapeHtml(row.reason)}</td></tr>`;
     }),
   ).join("");
   const unmatchedCustomerRows = ([["舊版", context.customerBefore], ["新版", context.customerAfter]] as const).flatMap(([version, result]) =>
     (result?.rows ?? []).filter((row) => ["location-unmatched", "mpn-unmatched", "missing-mpn", "tpn-missing", "ambiguous"].includes(row.status)).map((row) =>
       `<tr class="mapping-error"><td>${version}</td><td>${escapeHtml(mappingStatusText(row.status))}</td><td>${escapeHtml(row.record.customerPartNumber || "—")}</td><td>${joinValues(row.record.positions)}</td><td>${joinValues(row.record.manufacturerParts)}</td><td>${joinValues(row.companyPartNumbers)}</td><td>${escapeHtml(row.reason)}</td><td>${row.record.sourceRow}</td></tr>`),
   ).join("");
-  const customerSection = customerRows ? `<section><h2>客戶 BOM TPN 對應</h2><p class="note">每顆公司主料／替料皆獨立以 MPN 完全相同＋Location 集合相同進行配對；同一顆料可保留多組客戶 TPN。</p><div class="table-wrap"><table><thead><tr><th>版本</th><th>狀態</th><th>角色</th><th>公司料號</th><th>公司 MPN</th><th>Location</th><th>客戶 BOM TPN</th><th>BOM R欄 TPN</th><th>說明</th></tr></thead><tbody>${customerRows}</tbody></table></div>${unmatchedCustomerRows ? `<h3>客戶 BOM 未完整對應列</h3><div class="table-wrap"><table><thead><tr><th>版本</th><th>狀態</th><th>客戶 TPN</th><th>Location</th><th>客戶 MPN</th><th>已命中公司料號</th><th>說明</th><th>原始列</th></tr></thead><tbody>${unmatchedCustomerRows}</tbody></table></div>` : ""}</section>` : "";
+  const customerSection = customerRows ? `<section><h2>客戶 BOM TPN 對應</h2><p class="note">先以 Location 集合＋MPN 完全相同配對，再依 BOM R／S 欄順序關聯驗證 TPN；重複 TPN 任一 MPN 完全吻合即可。</p><div class="table-wrap"><table><thead><tr><th>版本</th><th>狀態</th><th>角色</th><th>公司料號</th><th>公司 MPN</th><th>Location</th><th>客戶 BOM TPN</th><th>BOM R欄 TPN</th><th>BOM S欄關聯</th><th>說明</th></tr></thead><tbody>${customerRows}</tbody></table></div>${unmatchedCustomerRows ? `<h3>客戶 BOM 未完整對應列</h3><div class="table-wrap"><table><thead><tr><th>版本</th><th>狀態</th><th>客戶 TPN</th><th>Location</th><th>客戶 MPN</th><th>已命中公司料號</th><th>說明</th><th>原始列</th></tr></thead><tbody>${unmatchedCustomerRows}</tbody></table></div>` : ""}</section>` : "";
   const mva = context.mvaBefore || context.mvaAfter;
   const mvaRows = mva ? ["smtTop", "smtBottom", "dipTop", "dipBottom"].map((key) => {
     const labels = { smtTop: "SMT Top", smtBottom: "SMT Bottom", dipTop: "DIP Top", dipBottom: "DIP Bottom" };

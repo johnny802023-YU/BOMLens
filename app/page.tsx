@@ -525,7 +525,7 @@ export default function Home() {
             {[{ label: "舊版", audit: beforeAudit }, { label: "新版", audit: afterAudit }].map(({ label, audit }) => audit && <div key={label}><ShieldCheck size={16} /><span><strong>{label}匯入完成</strong><small>{audit.sheetName}・{audit.audit.groupCount} 組料・{audit.audit.positionCount} 個位置・{audit.audit.issues.filter((issue) => issue.severity === "warning").length} 項警告</small></span></div>)}
           </section>}
           <section className="format-strip" aria-label="BOM 欄位規則">
-            <span><b>項次</b> 只切分同架構主替料，不跨版比對</span><span><b>架構</b> 69 → VB-D／60／VB-T／08 PCB</span><span><b>主件料號</b> 取最右 12 碼</span><span><b>數量</b> 一般數量</span><span><b>插件位置</b> 優先計數</span><span><b>製造廠商</b> 僅顯示</span><span><b>製造廠商料號</b> 完全一致驗證</span><span><b>TPN（R欄）</b> 讀取 BOM R欄並比對；Location＋MPN 命中但 R欄缺漏時請 RD 維護</span><strong>依標題名稱自動定位欄位</strong>
+            <span><b>項次</b> 只切分同架構主替料，不跨版比對</span><span><b>架構</b> 69 → VB-D／60／VB-T／08 PCB</span><span><b>主件料號</b> 取最右 12 碼</span><span><b>數量</b> 一般數量</span><span><b>插件位置</b> 優先計數</span><span><b>製造廠商</b> 僅顯示</span><span><b>製造廠商料號</b> 完全一致驗證</span><span><b>TPN（R／S欄）</b> 先驗證 Location＋MPN，再依 R／S 順序確認 TPN 對應 MPN</span><strong>依標題名稱自動定位欄位</strong>
           </section>
 
           <MvaPanel
@@ -652,6 +652,8 @@ function mappingStatusLabel(status: CustomerMappingResult["rows"][number]["statu
     matched: "配對成功",
     "rd-maintenance-missing": "請 RD 維護",
     "rd-maintenance-mismatch": "R欄料號不一致",
+    "tpn-association-mismatch": "TPN／MPN 不一致",
+    "tpn-association-invalid": "R／S 資料待確認",
     "location-unmatched": "Location 未匹配",
     "mpn-unmatched": "MPN 未匹配",
     "missing-mpn": "MPN 資料不足",
@@ -666,7 +668,7 @@ function CustomerMappingTable({ version, result }: { version: "舊版" | "新版
   return <div className="customer-table-wrap">
     <div className="customer-table-title"><strong>公司 BOM 主料／替料 TPN 對應</strong><small>每顆料獨立配對；同 MPN 以 Location 集合判斷實際 TPN</small></div>
     <table className="customer-table alternative-mapping-table">
-      <thead><tr><th>狀態</th><th>角色／公司料號</th><th>公司 MPN</th><th>Location</th><th>客戶 BOM TPN</th><th>BOM R欄 TPN</th><th>說明</th></tr></thead>
+      <thead><tr><th>狀態</th><th>角色／公司料號</th><th>公司 MPN</th><th>Location</th><th>客戶 BOM TPN</th><th>BOM R欄 TPN</th><th>BOM S欄關聯</th><th>說明</th></tr></thead>
       <tbody>{result.alternativeRows.map((row) => <tr className={row.status} key={`${version}-${row.itemIndex}-${row.alternativeIndex}`}>
         <td><span className={`mapping-status ${row.status}`}>{mappingStatusLabel(row.status)}</span></td>
         <td><span className="part-role">{row.role === "主料" ? "主" : "替"}</span><strong>{row.part || "—"}</strong></td>
@@ -674,6 +676,7 @@ function CustomerMappingTable({ version, result }: { version: "舊版" | "新版
         <td>{row.positions.join("、") || "—"}</td>
         <td className={!row.customerPartNumbers.length ? "mismatch" : ""}>{row.customerPartNumbers.join("\n") || "未對應"}</td>
         <td className={row.status === "rd-maintenance-missing" || row.status === "rd-maintenance-mismatch" ? "mismatch" : ""}>{row.rdCustomerPartNumbers.join("\n") || "空白"}</td>
+        <td className={row.status === "tpn-association-mismatch" || row.status === "tpn-association-invalid" ? "mismatch" : ""}>{row.customerAssociationEvidence.join("\n") || (row.status === "matched" ? "未提供 S欄" : "未找到吻合關聯")}</td>
         <td>{row.reason}</td>
       </tr>)}</tbody>
     </table>
@@ -701,7 +704,7 @@ function CustomerMappingPanel({ beforeName, afterName, before, after, onBefore, 
   const result = version === "before" ? before : after;
   return <div className="customer-panel">
     <div className="customer-import-bar">
-      <div><strong>客戶 BOM TPN 嚴格對應</strong><small>每顆主料／替料 MPN 逐字匹配；同料號以 Location 集合選出正確 TPN，並保留多組 TPN</small></div>
+      <div><strong>客戶 BOM TPN 嚴格對應</strong><small>先以 Location＋MPN 逐字匹配，再用 BOM R／S 欄順序關聯驗證 TPN；重複 TPN 任一 MPN 完全吻合即可</small></div>
       <div className="customer-files"><SupplementalFileChip label="舊版客戶 BOM" name={beforeName} onClick={onBefore} onClear={onClearBefore} /><SupplementalFileChip label="新版客戶 BOM" name={afterName} onClick={onAfter} onClear={onClearAfter} /></div>
     </div>
     <div className="customer-summary">
@@ -899,11 +902,13 @@ function PartList({ item, changedParts, tone }: { item?: BomItem; changedParts: 
 function CustomerPartStatus({ alternative, fallbackStatus, fallbackReason }: { alternative: BomAlternative; fallbackStatus?: BomItem["customerMappingStatus"]; fallbackReason?: string }) {
   const uniqueRdValues = [...new Set(alternative.rdCustomerPartNumbers ?? [])];
   const mappedTpns = [...new Set(alternative.customerPartNumbers ?? [])];
+  const associationEvidence = [...new Set(alternative.customerAssociationEvidence ?? [])];
   const status = alternative.customerMappingStatus ?? fallbackStatus ?? "not-imported";
   const reason = alternative.customerMappingReason ?? fallbackReason;
   if (status === "matched" && mappedTpns.length) return <>
     <small className="customer-part matched"><b>BOM R欄 TPN</b> {uniqueRdValues.join("、") || "—"}</small>
     <small className="customer-part matched"><b>客戶 BOM TPN</b> {mappedTpns.join("、")}・一致</small>
+    {associationEvidence.length > 0 && <small className="customer-part matched"><b>S欄關聯</b> {associationEvidence.join("；")}</small>}
   </>;
   if ((status === "rd-maintenance-missing" || status === "rd-maintenance-mismatch") && mappedTpns.length) return <>
     <small className="customer-part rd-warning"><b>BOM R欄 TPN</b> {uniqueRdValues.join("、") || "空白"}</small>
@@ -912,6 +917,8 @@ function CustomerPartStatus({ alternative, fallbackStatus, fallbackReason }: { a
   const labels = {
     "rd-maintenance-missing": "請 RD 維護",
     "rd-maintenance-mismatch": "R欄料號不一致",
+    "tpn-association-mismatch": "TPN／MPN 不一致",
+    "tpn-association-invalid": "R／S 資料待確認",
     "location-unmatched": "Location 未匹配",
     "mpn-unmatched": "MPN 未匹配",
     "missing-mpn": "MPN 資料不足",
@@ -923,6 +930,7 @@ function CustomerPartStatus({ alternative, fallbackStatus, fallbackReason }: { a
   return <>
     <small className={`customer-part ${status}`} title={reason}><b>BOM R欄 TPN</b> {uniqueRdValues.join("、") || "空白"}</small>
     <small className={`customer-part ${status}`} title={reason}><b>客戶 BOM TPN</b> {mappedTpns.join("、") || "未對應"}・{labels[status]}</small>
+    {associationEvidence.length > 0 && <small className={`customer-part ${status}`} title={reason}><b>S欄關聯</b> {associationEvidence.join("；")}</small>}
   </>;
 }
 

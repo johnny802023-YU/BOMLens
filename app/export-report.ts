@@ -129,6 +129,8 @@ function customerStatusLabel(item: BomDiff["before"] | BomDiff["after"]) {
   return {
     "rd-maintenance-missing": `客戶 BOM TPN ${mappedTpns.join("、") || "—"}・R欄空白，請 RD 維護`,
     "rd-maintenance-mismatch": `客戶 BOM TPN ${mappedTpns.join("、") || "—"}・R欄不一致，請 RD 維護`,
+    "tpn-association-mismatch": `客戶 BOM TPN ${mappedTpns.join("、") || "—"}・S欄 MPN 關聯不一致`,
+    "tpn-association-invalid": `客戶 BOM TPN ${mappedTpns.join("、") || "—"}・R／S 欄資料待確認`,
     "location-unmatched": "Location 未匹配",
     "mpn-unmatched": "MPN 未匹配",
     "missing-mpn": "MPN 資料不足",
@@ -615,8 +617,8 @@ async function appendOriginalBom(targetWorkbook: ExcelJS.Workbook, source: Origi
 function appendCustomerMappingSheet(workbook: ExcelJS.Workbook, before?: CustomerMappingResult | null, after?: CustomerMappingResult | null) {
   if (!before && !after) return;
   const sheet = workbook.addWorksheet("客戶 BOM TPN 對應", { properties: { defaultRowHeight: 28 } });
-  const headers = ["版本", "配對狀態", "角色", "公司料號", "公司製造廠商料號", "Location", "客戶 BOM TPN", "BOM R欄 TPN", "說明"];
-  styleTitle(sheet, "A1:I1", "客戶 BOM TPN－公司主料／替料逐顆對應結果");
+  const headers = ["版本", "配對狀態", "角色", "公司料號", "公司製造廠商料號", "Location", "客戶 BOM TPN", "BOM R欄 TPN", "BOM S欄關聯", "說明"];
+  styleTitle(sheet, "A1:J1", "客戶 BOM TPN－公司主料／替料逐顆對應結果");
   sheet.getRow(2).values = headers;
   styleHeader(sheet.getRow(2));
   const entries = ([["舊版", before], ["新版", after]] as const).flatMap(([version, result]) =>
@@ -633,6 +635,7 @@ function appendCustomerMappingSheet(workbook: ExcelJS.Workbook, before?: Custome
       row.positions.join("\n"),
       row.customerPartNumbers.join("\n"),
       row.rdCustomerPartNumbers.join("\n"),
+      row.customerAssociationEvidence.join("\n"),
       row.reason,
     ];
     target.height = 36;
@@ -646,9 +649,14 @@ function appendCustomerMappingSheet(workbook: ExcelJS.Workbook, before?: Custome
       target.getCell(2).fill = fill(colors.paleGreen);
       target.getCell(2).font = { name: "Microsoft JhengHei", size: 10, bold: true, color: { argb: colors.green } };
     } else if (row.status === "rd-maintenance-missing" || row.status === "rd-maintenance-mismatch") {
-      [2, 7, 8, 9].forEach((column) => {
+      [2, 7, 8, 10].forEach((column) => {
         target.getCell(column).fill = fill("FFF3DC");
         target.getCell(column).font = { name: "Microsoft JhengHei", size: 10, bold: true, color: { argb: colors.amber } };
+      });
+    } else if (row.status === "tpn-association-mismatch" || row.status === "tpn-association-invalid") {
+      [2, 7, 8, 9, 10].forEach((column) => {
+        target.getCell(column).fill = fill(row.status === "tpn-association-invalid" ? colors.paleAmber : colors.paleRed);
+        target.getCell(column).font = { name: "Microsoft JhengHei", size: 10, bold: true, color: { argb: row.status === "tpn-association-invalid" ? colors.amber : colors.red } };
       });
     } else {
       [2, 5, 6, 7].forEach((column) => {
@@ -657,10 +665,10 @@ function appendCustomerMappingSheet(workbook: ExcelJS.Workbook, before?: Custome
       });
     }
   });
-  const widths = [10, 18, 10, 22, 30, 26, 28, 28, 68];
+  const widths = [10, 20, 10, 22, 30, 26, 28, 28, 46, 68];
   widths.forEach((width, index) => { sheet.getColumn(index + 1).width = width; });
   sheet.views = [{ state: "frozen", ySplit: 2, showGridLines: false }];
-  sheet.autoFilter = { from: "A2", to: `I${Math.max(2, entries.length + 2)}` };
+  sheet.autoFilter = { from: "A2", to: `J${Math.max(2, entries.length + 2)}` };
 
   const unmatchedEntries = ([["舊版", before], ["新版", after]] as const).flatMap(([version, result]) =>
     (result?.rows ?? [])

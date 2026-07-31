@@ -5,12 +5,26 @@ export type BomAlternative = {
   description: string;
   spec: string;
   rdCustomerPartNumbers?: string[];
+  rdCustomerPartAssociations?: BomCustomerPartAssociation[];
+  rdCustomerAssociationStatus?: BomCustomerAssociationStatus;
+  rdCustomerAssociationIssue?: string;
+  rdCustomerAssociationUnresolvedTpns?: string[];
   customerPartNumbers?: string[];
   customerMappingStatus?: BomCustomerMappingStatus;
   customerMappingReason?: string;
+  customerAssociationEvidence?: string[];
 };
 
-export type BomCustomerMappingStatus = "matched" | "rd-maintenance-missing" | "rd-maintenance-mismatch" | "location-unmatched" | "mpn-unmatched" | "missing-mpn" | "tpn-missing" | "ambiguous" | "not-imported";
+export type BomCustomerPartAssociation = {
+  customerPartNumber: string;
+  manufacturerPart: string;
+  manufacturerName?: string;
+  sourceRow: number;
+};
+
+export type BomCustomerAssociationStatus = "not-provided" | "valid" | "invalid";
+
+export type BomCustomerMappingStatus = "matched" | "rd-maintenance-missing" | "rd-maintenance-mismatch" | "tpn-association-mismatch" | "tpn-association-invalid" | "location-unmatched" | "mpn-unmatched" | "missing-mpn" | "tpn-missing" | "ambiguous" | "not-imported";
 
 export type BomStructureKind = "root69" | "vb-t" | "vb-d" | "board60" | "pcb" | "flat";
 export type BomProcessKind = "SMT" | "DIP";
@@ -40,6 +54,7 @@ export type BomItem = {
   customerMappingStatus?: BomCustomerMappingStatus;
   customerMappingReason?: string;
   rdCustomerPartNumbers?: string[];
+  rdCustomerPartAssociations?: BomCustomerPartAssociation[];
 };
 
 export type DiffKind = "added" | "removed" | "changed" | "same";
@@ -67,7 +82,7 @@ export type BomDiff = {
   needsReview: boolean;
 };
 
-export type CompanyColumnKey = "ref" | "part" | "qty" | "positions" | "description" | "spec" | "manufacturerName" | "manufacturerPart" | "customerPartNumbers";
+export type CompanyColumnKey = "ref" | "part" | "qty" | "positions" | "description" | "spec" | "manufacturerName" | "manufacturerPart" | "customerPartNumbers" | "customerPartAssociations";
 export type CompanyColumnMapping = Partial<Record<CompanyColumnKey, number>>;
 export type ImportIssue = { severity: "error" | "warning"; code: string; message: string; rows?: number[] };
 export type ImportAudit = {
@@ -90,6 +105,7 @@ const aliases = {
   qty: ["qty", "quantity", "count", "數量", "用量", "組成用量"],
   positions: ["placement", "placements", "location", "locations", "插件位置", "位置"],
   customerPartNumbers: ["customer part number", "customer pn", "customer tpn", "tpn", "客戶料號", "客戶 tpn", "對應客戶料號"],
+  customerPartAssociations: ["customer part association", "tpn mpn association", "廠商料號及型態", "廠商/料號及型態", "廠商／料號及型態"],
 };
 
 type CompanyColumns = {
@@ -102,6 +118,7 @@ type CompanyColumns = {
   manufacturerName?: number;
   manufacturerPart?: number;
   customerPartNumbers?: number;
+  customerPartAssociations?: number;
 };
 
 export const companyColumnLabels: Record<CompanyColumnKey, string> = {
@@ -114,6 +131,7 @@ export const companyColumnLabels: Record<CompanyColumnKey, string> = {
   manufacturerName: "製造廠商",
   manufacturerPart: "製造廠商料號",
   customerPartNumbers: "TPN／對應客戶料號（R欄）",
+  customerPartAssociations: "TPN 對應廠商料號（S欄）",
 };
 
 export const requiredCompanyColumns: CompanyColumnKey[] = ["ref", "part", "qty", "positions"];
@@ -128,6 +146,7 @@ const companyHeaderAliases = {
   manufacturerName: ["製造廠商", "11製造廠商", "製造商名稱", "製造商", "manufacturer name", "manufacturer", "mfr"],
   manufacturerPart: ["製造廠商料號", "16製造廠商料號", "製造商料號", "製造商型號", "manufacturer part number", "mpn"],
   customerPartNumbers: ["對應客戶料號", "客戶料號", "客戶 tpn", "customer part number", "customer pn", "customer tpn", "tpn"],
+  customerPartAssociations: ["廠商/料號及型態", "廠商／料號及型態", "廠商料號及型態", "tpn 對應廠商料號", "customer part association", "tpn mpn association"],
 };
 
 function text(value: unknown) {
@@ -207,6 +226,58 @@ export function parseCustomerPartNumbers(value: unknown) {
     .filter(Boolean))];
 }
 
+function parseOrderedValues(value: unknown) {
+  const raw = text(value);
+  if (!raw) return [];
+  return raw.split(/[|,，;；\r\n]+/).map((entry) => entry.trim().toUpperCase());
+}
+
+function parseCustomerAssociationValue(value: string) {
+  const slashIndex = value.lastIndexOf("/");
+  return {
+    manufacturerName: slashIndex >= 0 ? value.slice(0, slashIndex).trim() : "",
+    manufacturerPart: (slashIndex >= 0 ? value.slice(slashIndex + 1) : value).trim(),
+  };
+}
+
+function parseCustomerPartAssociations(customerPartValue: unknown, associationValue: unknown, sourceRow: number, provided: boolean) {
+  const customerPartNumbers = parseOrderedValues(customerPartValue);
+  if (!provided) {
+    return {
+      associations: [] as BomCustomerPartAssociation[],
+      status: "not-provided" as const,
+      issue: "",
+      unresolvedTpns: [] as string[],
+    };
+  }
+  const associationValues = parseOrderedValues(associationValue);
+  const invalid = customerPartNumbers.length !== associationValues.length
+    || customerPartNumbers.some((value) => !value)
+    || associationValues.some((value) => !value);
+  if (invalid) {
+    return {
+      associations: [] as BomCustomerPartAssociation[],
+      status: "invalid" as const,
+      issue: `Excel 第 ${sourceRow} 列 R／S 欄筆數不同或包含空白項目。`,
+      unresolvedTpns: customerPartNumbers.filter(Boolean),
+    };
+  }
+  return {
+    associations: customerPartNumbers.map((customerPartNumber, index) => {
+      const parsed = parseCustomerAssociationValue(associationValues[index]);
+      return {
+        customerPartNumber,
+        manufacturerPart: parsed.manufacturerPart,
+        manufacturerName: parsed.manufacturerName,
+        sourceRow,
+      };
+    }),
+    status: "valid" as const,
+    issue: "",
+    unresolvedTpns: [] as string[],
+  };
+}
+
 function findHeaderColumn(row: unknown[], names: string[]) {
   const normalizedNames = new Set(names.map(normalizeKey));
   return row.findIndex((cell) => normalizedNames.has(normalizeKey(text(cell))));
@@ -231,6 +302,7 @@ export function detectCompanyColumns(headerRow: unknown[]): CompanyColumnMapping
     manufacturerName: optionalColumn(companyHeaderAliases.manufacturerName),
     manufacturerPart: optionalColumn(companyHeaderAliases.manufacturerPart),
     customerPartNumbers: optionalColumn(companyHeaderAliases.customerPartNumbers),
+    customerPartAssociations: optionalColumn(companyHeaderAliases.customerPartAssociations),
   };
 }
 
@@ -285,6 +357,12 @@ export function parseCompanyBomMatrix(matrix: unknown[][], headerIndex = findCom
     const manufacturerName = text(cell(row, columns.manufacturerName));
     const manufacturerPart = text(cell(row, columns.manufacturerPart));
     const rdCustomerPartNumbers = parseCustomerPartNumbers(cell(row, columns.customerPartNumbers));
+    const parsedAssociations = parseCustomerPartAssociations(
+      cell(row, columns.customerPartNumbers),
+      cell(row, columns.customerPartAssociations),
+      sourceRow,
+      columns.customerPartAssociations != null,
+    );
 
     if (!part && !manufacturerPart && !positions.length && !rawQuantity) continue;
 
@@ -324,13 +402,41 @@ export function parseCompanyBomMatrix(matrix: unknown[][], headerIndex = findCom
     if (!currentGroup) continue;
 
     if (part || manufacturerPart) {
-      const alternative = { part, manufacturerPart, manufacturerName, description, spec, rdCustomerPartNumbers };
+      const alternative = {
+        part,
+        manufacturerPart,
+        manufacturerName,
+        description,
+        spec,
+        rdCustomerPartNumbers,
+        rdCustomerPartAssociations: parsedAssociations.associations,
+        rdCustomerAssociationStatus: parsedAssociations.status,
+        rdCustomerAssociationIssue: parsedAssociations.issue,
+        rdCustomerAssociationUnresolvedTpns: parsedAssociations.unresolvedTpns,
+      };
       const alternativeKey = altKey(alternative);
       const existingAlternative = currentGroup.alternatives.find((candidate) => altKey(candidate) === alternativeKey);
       if (!existingAlternative) {
         currentGroup.alternatives.push(alternative);
       } else {
         existingAlternative.rdCustomerPartNumbers = [...new Set([...(existingAlternative.rdCustomerPartNumbers ?? []), ...rdCustomerPartNumbers])];
+        existingAlternative.rdCustomerPartAssociations = [
+          ...(existingAlternative.rdCustomerPartAssociations ?? []),
+          ...parsedAssociations.associations,
+        ];
+        existingAlternative.rdCustomerAssociationUnresolvedTpns = [...new Set([
+          ...(existingAlternative.rdCustomerAssociationUnresolvedTpns ?? []),
+          ...parsedAssociations.unresolvedTpns,
+        ])];
+        if (existingAlternative.rdCustomerAssociationStatus !== "invalid" && parsedAssociations.status === "invalid") {
+          existingAlternative.rdCustomerAssociationStatus = "invalid";
+        } else if (existingAlternative.rdCustomerAssociationStatus === "not-provided" && parsedAssociations.status === "valid") {
+          existingAlternative.rdCustomerAssociationStatus = "valid";
+        }
+        existingAlternative.rdCustomerAssociationIssue = [
+          existingAlternative.rdCustomerAssociationIssue,
+          parsedAssociations.issue,
+        ].filter(Boolean).join("；");
       }
     }
     positions.forEach((position) => currentGroup.positions.add(position));
@@ -342,6 +448,7 @@ export function parseCompanyBomMatrix(matrix: unknown[][], headerIndex = findCom
     const positions = [...group.positions].sort(naturalSort);
     const first = group.alternatives[0] ?? { part: "", manufacturerPart: "", manufacturerName: "", description: "", spec: "", rdCustomerPartNumbers: [] };
     const rdCustomerPartNumbers = [...new Set(group.alternatives.flatMap((alternative) => alternative.rdCustomerPartNumbers ?? []))];
+    const rdCustomerPartAssociations = group.alternatives.flatMap((alternative) => alternative.rdCustomerPartAssociations ?? []);
     return {
       ref: group.ref,
       part: first.part,
@@ -358,6 +465,7 @@ export function parseCompanyBomMatrix(matrix: unknown[][], headerIndex = findCom
       structurePath: group.structurePath,
       structureKey: group.structureKey,
       rdCustomerPartNumbers,
+      rdCustomerPartAssociations,
     };
   });
 }
@@ -373,6 +481,17 @@ export function analyzeCompanyBomMatrix(matrix: unknown[][], headerIndex: number
   }
   const items = isCompleteCompanyMapping(mapping) ? parseCompanyBomMatrix(matrix, headerIndex, mapping) : [];
   if (!missing.length && !items.length) issues.push({ severity: "error", code: "no-data", message: "標題下方沒有可辨識的 BOM 資料。" });
+  const associationIssues = items.flatMap((item) => item.alternatives
+    .filter((alternative) => alternative.rdCustomerAssociationStatus === "invalid")
+    .map((alternative) => alternative.rdCustomerAssociationIssue)
+    .filter(Boolean));
+  if (associationIssues.length) {
+    issues.push({
+      severity: "warning",
+      code: "customer-association-invalid",
+      message: `發現 ${associationIssues.length} 筆 R／S 欄順序資料不完整；客戶 BOM 對應時將列入人工確認。`,
+    });
+  }
 
   const duplicatePositions = new Map<string, Array<{ ref: string; rows: number[] }>>();
   items.forEach((item) => item.positions.forEach((position) => {

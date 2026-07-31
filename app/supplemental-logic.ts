@@ -1,4 +1,4 @@
-import { bomProcessKind, type BomAlternative, type BomCustomerMappingStatus, type BomItem } from "./bom-logic.ts";
+import { bomProcessKind, type BomAlternative, type BomCustomerMappingStatus, type BomCustomerPartAssociation, type BomItem } from "./bom-logic.ts";
 
 export type CustomerBomColumnKey = "customerPartNumber" | "manufacturerParts" | "positions";
 export type CustomerBomColumnMapping = Partial<Record<CustomerBomColumnKey, number>>;
@@ -19,6 +19,7 @@ export type CustomerMappingRow = {
   companyManufacturerParts: string[];
   companyPartNumbers: string[];
   companyRdCustomerPartNumbers: string[];
+  customerAssociationEvidence: string[];
 };
 
 export type CustomerAlternativeMappingRow = {
@@ -30,6 +31,7 @@ export type CustomerAlternativeMappingRow = {
   positions: string[];
   rdCustomerPartNumbers: string[];
   customerPartNumbers: string[];
+  customerAssociationEvidence: string[];
   status: Exclude<CustomerMappingStatus, "not-imported">;
   reason: string;
 };
@@ -216,12 +218,81 @@ function rdCustomerNumbers(item: BomItem | BomAlternative) {
     .filter(Boolean))];
 }
 
-function maintainedStatus(item: BomItem | BomAlternative, expectedTpns: string[]) {
+type CustomerAssociationIndex = {
+  enabled: boolean;
+  byTpn: Map<string, BomCustomerPartAssociation[]>;
+  invalidTpns: Set<string>;
+  invalidReasons: Map<string, string[]>;
+};
+
+type MaintenanceResult = {
+  status: "matched" | "rd-maintenance-missing" | "rd-maintenance-mismatch" | "tpn-association-mismatch" | "tpn-association-invalid";
+  evidence: string[];
+  affectedTpns: string[];
+};
+
+function buildCustomerAssociationIndex(items: BomItem[]): CustomerAssociationIndex {
+  const byTpn = new Map<string, BomCustomerPartAssociation[]>();
+  const invalidTpns = new Set<string>();
+  const invalidReasons = new Map<string, string[]>();
+  let enabled = false;
+  items.forEach((item) => item.alternatives.forEach((alternative) => {
+    if (alternative.rdCustomerAssociationStatus && alternative.rdCustomerAssociationStatus !== "not-provided") enabled = true;
+    (alternative.rdCustomerPartAssociations ?? []).forEach((association) => {
+      const tpn = association.customerPartNumber.trim().toUpperCase();
+      if (!tpn) return;
+      byTpn.set(tpn, [...(byTpn.get(tpn) ?? []), association]);
+    });
+    (alternative.rdCustomerAssociationUnresolvedTpns ?? []).forEach((tpn) => {
+      const normalized = tpn.trim().toUpperCase();
+      if (!normalized) return;
+      invalidTpns.add(normalized);
+      const reason = alternative.rdCustomerAssociationIssue || `${normalized} 的 R／S 欄資料不完整。`;
+      invalidReasons.set(normalized, unique([...(invalidReasons.get(normalized) ?? []), reason]));
+    });
+  }));
+  return { enabled, byTpn, invalidTpns, invalidReasons };
+}
+
+function associationEvidence(association: BomCustomerPartAssociation) {
+  const maker = association.manufacturerName ? `${association.manufacturerName}/` : "";
+  return `${association.customerPartNumber} → ${maker}${association.manufacturerPart}（Excel 第 ${association.sourceRow} 列）`;
+}
+
+function maintainedStatus(item: BomItem | BomAlternative, expectedTpns: string[], associationIndex: CustomerAssociationIndex): MaintenanceResult {
   const maintained = new Set(rdCustomerNumbers(item));
   const expected = [...new Set(expectedTpns.map((value) => value.trim().toUpperCase()).filter(Boolean))];
-  if (!maintained.size) return "rd-maintenance-missing" as const;
-  if (expected.some((tpn) => !maintained.has(tpn))) return "rd-maintenance-mismatch" as const;
-  return "matched" as const;
+  if (!maintained.size) return { status: "rd-maintenance-missing", evidence: [], affectedTpns: expected };
+  const missingTpns = expected.filter((tpn) => !maintained.has(tpn));
+  if (missingTpns.length) return { status: "rd-maintenance-mismatch", evidence: [], affectedTpns: missingTpns };
+  if (!associationIndex.enabled) return { status: "matched", evidence: [], affectedTpns: [] };
+
+  const manufacturerPart = normalizeMpn("manufacturerPart" in item ? item.manufacturerPart : "");
+  const evidence: string[] = [];
+  const invalidTpns: string[] = [];
+  const mismatchedTpns: string[] = [];
+  expected.forEach((tpn) => {
+    const candidates = associationIndex.byTpn.get(tpn) ?? [];
+    const matches = candidates.filter((association) => normalizeMpn(association.manufacturerPart) === manufacturerPart);
+    if (matches.length) {
+      evidence.push(...matches.map(associationEvidence));
+    } else {
+      evidence.push(...candidates.map(associationEvidence));
+      if (associationIndex.invalidTpns.has(tpn)) {
+        invalidTpns.push(tpn);
+        evidence.push(...(associationIndex.invalidReasons.get(tpn) ?? []));
+      } else {
+        mismatchedTpns.push(tpn);
+      }
+    }
+  });
+  if (invalidTpns.length) {
+    return { status: "tpn-association-invalid", evidence: unique(evidence), affectedTpns: invalidTpns };
+  }
+  if (mismatchedTpns.length) {
+    return { status: "tpn-association-mismatch", evidence: unique(evidence), affectedTpns: mismatchedTpns };
+  }
+  return { status: "matched", evidence: unique(evidence), affectedTpns: [] };
 }
 
 function unique(values: string[]) {
@@ -229,10 +300,22 @@ function unique(values: string[]) {
 }
 
 function emptyCounts(): CustomerMappingResult["counts"] {
-  return { matched: 0, "rd-maintenance-missing": 0, "rd-maintenance-mismatch": 0, "location-unmatched": 0, "mpn-unmatched": 0, "missing-mpn": 0, "tpn-missing": 0, ambiguous: 0 };
+  return {
+    matched: 0,
+    "rd-maintenance-missing": 0,
+    "rd-maintenance-mismatch": 0,
+    "tpn-association-mismatch": 0,
+    "tpn-association-invalid": 0,
+    "location-unmatched": 0,
+    "mpn-unmatched": 0,
+    "missing-mpn": 0,
+    "tpn-missing": 0,
+    ambiguous: 0,
+  };
 }
 
 export function mapCustomerBom(items: BomItem[], records: CustomerBomRecord[]): CustomerMappingResult {
+  const associationIndex = buildCustomerAssociationIndex(items);
   const alternatives = items.flatMap((item, itemIndex) => item.alternatives.map((alternative, alternativeIndex) => ({
     item,
     itemIndex,
@@ -256,7 +339,7 @@ export function mapCustomerBom(items: BomItem[], records: CustomerBomRecord[]): 
     const companyItem = matches[0]?.item ?? (locationItems.length === 1 ? locationItems[0] : undefined);
 
     if (!locationItems.length) {
-      return { record, status: "location-unmatched", reason: "找不到 Location 集合完全相同的公司料群。", companyManufacturerParts: [], companyPartNumbers: [], companyRdCustomerPartNumbers: [] };
+      return { record, status: "location-unmatched", reason: "找不到 Location 集合完全相同的公司料群。", companyManufacturerParts: [], companyPartNumbers: [], companyRdCustomerPartNumbers: [], customerAssociationEvidence: [] };
     }
     if (!record.manufacturerParts.length || locationItems.some((item) => companyMpns(item).length === 0)) {
       return {
@@ -267,6 +350,7 @@ export function mapCustomerBom(items: BomItem[], records: CustomerBomRecord[]): 
         companyManufacturerParts,
         companyPartNumbers,
         companyRdCustomerPartNumbers,
+        customerAssociationEvidence: [],
       };
     }
     if (!matches.length) {
@@ -278,6 +362,7 @@ export function mapCustomerBom(items: BomItem[], records: CustomerBomRecord[]): 
         companyManufacturerParts,
         companyPartNumbers,
         companyRdCustomerPartNumbers,
+        customerAssociationEvidence: [],
       };
     }
 
@@ -295,6 +380,7 @@ export function mapCustomerBom(items: BomItem[], records: CustomerBomRecord[]): 
         companyManufacturerParts,
         companyPartNumbers,
         companyRdCustomerPartNumbers,
+        customerAssociationEvidence: [],
       };
     }
     const customerTpn = record.customerPartNumber.trim().toUpperCase();
@@ -307,26 +393,40 @@ export function mapCustomerBom(items: BomItem[], records: CustomerBomRecord[]): 
         companyManufacturerParts,
         companyPartNumbers,
         companyRdCustomerPartNumbers,
+        customerAssociationEvidence: [],
       };
     }
-    const maintenanceStatuses = matches.map(({ alternative }) => maintainedStatus(alternative, [customerTpn]));
+    const maintenanceResults = matches.map(({ alternative }) => maintainedStatus(alternative, [customerTpn], associationIndex));
+    const maintenanceStatuses = maintenanceResults.map((result) => result.status);
+    const customerAssociationEvidence = unique(maintenanceResults.flatMap((result) => result.evidence));
     const maintenanceStatus = maintenanceStatuses.includes("rd-maintenance-missing")
       ? "rd-maintenance-missing"
       : maintenanceStatuses.includes("rd-maintenance-mismatch")
         ? "rd-maintenance-mismatch"
+        : maintenanceStatuses.includes("tpn-association-invalid")
+          ? "tpn-association-invalid"
+          : maintenanceStatuses.includes("tpn-association-mismatch")
+            ? "tpn-association-mismatch"
         : "matched";
     return {
       record,
       status: maintenanceStatus,
       reason: maintenanceStatus === "matched"
-        ? "Location 與每顆主料／替料 MPN 完全匹配，客戶 TPN 也存在於各料件 BOM R欄。"
+        ? associationIndex.enabled
+          ? "Location 與每顆主料／替料 MPN 完全匹配，且客戶 TPN 與 BOM S欄 MPN 關聯一致。"
+          : "Location 與每顆主料／替料 MPN 完全匹配，客戶 TPN 也存在於各料件 BOM R欄；此 BOM 未提供 S欄關聯資料。"
         : maintenanceStatus === "rd-maintenance-missing"
           ? "Location 與 MPN 已匹配，但至少一顆主料／替料的 BOM R欄沒有維護此 TPN，請 RD 維護。"
-          : "Location 與 MPN 已匹配，但至少一顆主料／替料的 BOM R欄缺少此客戶 TPN，請 RD 確認並維護。",
+          : maintenanceStatus === "rd-maintenance-mismatch"
+            ? "Location 與 MPN 已匹配，但至少一顆主料／替料的 BOM R欄缺少此客戶 TPN，請 RD 確認並維護。"
+            : maintenanceStatus === "tpn-association-invalid"
+              ? "BOM R欄包含此 TPN，但相關 R／S 欄筆數不同或含空白，無法確認 TPN 對應 MPN，請人工確認。"
+              : "BOM R欄包含此 TPN，但所有 S欄候選 MPN 均與客戶 BOM MPN 不同。",
       companyItem,
       companyManufacturerParts,
       companyPartNumbers,
       companyRdCustomerPartNumbers,
+      customerAssociationEvidence,
     };
   });
 
@@ -344,12 +444,19 @@ export function mapCustomerBom(items: BomItem[], records: CustomerBomRecord[]): 
       status = "tpn-missing";
       reason = "Location 與 MPN 已匹配，但客戶 BOM TPN 空白。";
     } else if (customerPartNumbers.length) {
-      status = maintainedStatus(candidate.alternative, customerPartNumbers);
+      const maintenance = maintainedStatus(candidate.alternative, customerPartNumbers, associationIndex);
+      status = maintenance.status;
       reason = status === "matched"
-        ? `已依 Location＋MPN 帶入 ${customerPartNumbers.length} 組 TPN，且均存在於此料件 BOM R欄。`
+        ? associationIndex.enabled
+          ? `已依 Location＋MPN 帶入 ${customerPartNumbers.length} 組 TPN，且 TPN／S欄 MPN 關聯完全一致。`
+          : `已依 Location＋MPN 帶入 ${customerPartNumbers.length} 組 TPN，且均存在於此料件 BOM R欄；此 BOM 未提供 S欄。`
         : status === "rd-maintenance-missing"
           ? `已帶入 ${customerPartNumbers.length} 組 TPN，但此料件 BOM R欄空白，請 RD 維護。`
-          : `已帶入 ${customerPartNumbers.length} 組 TPN，但 BOM R欄缺少：${customerPartNumbers.filter((tpn) => !rdPartNumbers.includes(tpn)).join("、")}。`;
+          : status === "rd-maintenance-mismatch"
+            ? `已帶入 ${customerPartNumbers.length} 組 TPN，但 BOM R欄缺少：${customerPartNumbers.filter((tpn) => !rdPartNumbers.includes(tpn)).join("、")}。`
+            : status === "tpn-association-invalid"
+              ? `TPN ${maintenance.affectedTpns.join("、")} 的 R／S 欄順序資料不完整，請人工確認。`
+              : `TPN ${maintenance.affectedTpns.join("、")} 在 S欄沒有與公司／客戶 MPN ${candidate.mpn} 完全相同的候選。`;
     } else {
       const sameMpn = records.filter((record) => record.manufacturerParts.map(normalizeMpn).includes(candidate.mpn));
       const sameLocation = records.filter((record) => positionKey(record.positions) === candidate.locationKey);
@@ -373,12 +480,15 @@ export function mapCustomerBom(items: BomItem[], records: CustomerBomRecord[]): 
       positions: candidate.item.positions,
       rdCustomerPartNumbers: rdPartNumbers,
       customerPartNumbers,
+      customerAssociationEvidence: customerPartNumbers.length
+        ? maintainedStatus(candidate.alternative, customerPartNumbers, associationIndex).evidence
+        : [],
       status,
       reason,
     };
   });
 
-  const statusPriority: Array<CustomerAlternativeMappingRow["status"]> = ["ambiguous", "tpn-missing", "missing-mpn", "mpn-unmatched", "location-unmatched", "rd-maintenance-mismatch", "rd-maintenance-missing", "matched"];
+  const statusPriority: Array<CustomerAlternativeMappingRow["status"]> = ["ambiguous", "tpn-missing", "missing-mpn", "mpn-unmatched", "location-unmatched", "tpn-association-invalid", "tpn-association-mismatch", "rd-maintenance-mismatch", "rd-maintenance-missing", "matched"];
   const mappedItems = items.map((item, itemIndex) => {
     const itemRows = alternativeRows.filter((row) => row.itemIndex === itemIndex);
     const mappedAlternatives = item.alternatives.map((alternative, alternativeIndex) => {
@@ -388,6 +498,7 @@ export function mapCustomerBom(items: BomItem[], records: CustomerBomRecord[]): 
         customerPartNumbers: row.customerPartNumbers,
         customerMappingStatus: row.status,
         customerMappingReason: row.reason,
+        customerAssociationEvidence: row.customerAssociationEvidence,
       };
     });
     const customerPartNumbers = unique(itemRows.flatMap((row) => row.customerPartNumbers));

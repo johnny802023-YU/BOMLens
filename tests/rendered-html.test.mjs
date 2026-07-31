@@ -1080,6 +1080,66 @@ test("flags RD maintenance when Location and MPN match but the BOM R column is m
   assert.equal(matched.items[0].customerMappingStatus, "matched");
 });
 
+test("parses ordered BOM R and S associations and validates duplicate TPN candidates by exact MPN", () => {
+  const header = ["項次", "主件料號", "組成用量", "插件位置", "製造廠商", "製造廠商料號", "對應客戶料號", "廠商/料號及型態"];
+  assert.equal(detectCompanyColumns(header).customerPartAssociations, 7);
+  const company = parseCompanyBomMatrix([
+    header,
+    ["001", "0704-06HL0ZY", 1, "Q33,Q13", "TOSHIBA", "SSM3K361R_LXHF", "2156321-00-A,1982053-00-A", "TOSHIBA/SSM3K361R_LXHF,TOSHIBA/OTHER-MPN"],
+    ["002", "0704-OTHER01", 1, "Q99", "TOSHIBA", "SSM3K361R_LXHF", "2156321-00-A", "TOSHIBA/SSM3K361R_LXHF"],
+  ]);
+  assert.deepEqual(company[0].alternatives[0].rdCustomerPartAssociations, [
+    { customerPartNumber: "2156321-00-A", manufacturerPart: "SSM3K361R_LXHF", manufacturerName: "TOSHIBA", sourceRow: 2 },
+    { customerPartNumber: "1982053-00-A", manufacturerPart: "OTHER-MPN", manufacturerName: "TOSHIBA", sourceRow: 2 },
+  ]);
+  const result = mapCustomerBom(company, [
+    { customerPartNumber: "2156321-00-A", manufacturerParts: ["SSM3K361R_LXHF"], positions: ["Q13", "Q33"], sourceRow: 2 },
+  ]);
+  assert.equal(result.alternativeRows[0].status, "matched");
+  assert.match(result.alternativeRows[0].customerAssociationEvidence[0], /2156321-00-A → TOSHIBA\/SSM3K361R_LXHF/);
+});
+
+test("flags S-column MPN mismatches and malformed R/S ordering without fuzzy matching", () => {
+  const header = ["項次", "主件料號", "組成用量", "插件位置", "製造廠商料號", "對應客戶料號", "廠商／料號及型態"];
+  const mismatch = parseCompanyBomMatrix([
+    header,
+    ["001", "PART-A", 1, "U1", "ABC-100-A", "TPN-1", "MAKER/ABC100-A"],
+  ]);
+  const mismatchResult = mapCustomerBom(mismatch, [
+    { customerPartNumber: "TPN-1", manufacturerParts: ["ABC-100-A"], positions: ["U1"], sourceRow: 2 },
+  ]);
+  assert.equal(mismatchResult.alternativeRows[0].status, "tpn-association-mismatch");
+  assert.match(mismatchResult.alternativeRows[0].customerAssociationEvidence[0], /MAKER\/ABC100-A/);
+
+  const malformedMatrix = [
+    header,
+    ["001", "PART-A", 1, "U1", "ABC-100-A", "TPN-1,TPN-2", "MAKER/ABC-100-A"],
+  ];
+  const malformed = parseCompanyBomMatrix(malformedMatrix);
+  const malformedResult = mapCustomerBom(malformed, [
+    { customerPartNumber: "TPN-1", manufacturerParts: ["ABC-100-A"], positions: ["U1"], sourceRow: 2 },
+  ]);
+  assert.equal(malformedResult.alternativeRows[0].status, "tpn-association-invalid");
+  assert.match(malformedResult.alternativeRows[0].reason, /R／S 欄順序資料不完整/);
+  assert.match(malformedResult.alternativeRows[0].customerAssociationEvidence[0], /Excel 第 2 列/);
+  const audit = analyzeCompanyBomMatrix(malformedMatrix, 0).audit;
+  assert.ok(audit.issues.some((issue) => issue.code === "customer-association-invalid"));
+});
+
+test("accepts an exact duplicate TPN association even when another R/S candidate is malformed", () => {
+  const header = ["項次", "主件料號", "組成用量", "插件位置", "製造廠商料號", "對應客戶料號", "廠商料號及型態"];
+  const company = parseCompanyBomMatrix([
+    header,
+    ["001", "PART-A", 1, "U1", "MPN-A", "TPN-1,TPN-2", "MAKER/MPN-A"],
+    ["002", "PART-B", 1, "U2", "MPN-A", "TPN-1", "OTHER/MPN-A"],
+  ]);
+  const result = mapCustomerBom(company, [
+    { customerPartNumber: "TPN-1", manufacturerParts: ["MPN-A"], positions: ["U1"], sourceRow: 2 },
+  ]);
+  assert.equal(result.alternativeRows[0].status, "matched");
+  assert.match(result.alternativeRows[0].customerAssociationEvidence[0], /Excel 第 3 列/);
+});
+
 test("maps every main and substitute part independently and keeps multiple customer TPNs", () => {
   const company = [{
     ref: "001", part: "PART-A", manufacturerPart: "MPN-A", manufacturerName: "", value: "", description: "", qty: 1,
@@ -1180,12 +1240,14 @@ test("exports customer mapping statuses and MVA details to Excel and HTML", asyn
   assert.ok(workbook.getWorksheet("客戶 BOM TPN 對應"));
   assert.ok(workbook.getWorksheet("MVA 明細"));
   assert.equal(workbook.getWorksheet("客戶 BOM TPN 對應").getCell("G3").value, "CUST-001");
+  assert.equal(workbook.getWorksheet("客戶 BOM TPN 對應").getCell("I2").value, "BOM S欄關聯");
   assert.equal(workbook.getWorksheet("MVA 明細").getCell("B5").value, 1);
   const dataHeaders = workbook.getWorksheet("差異資料").getRow(5).values;
   assert.ok(dataHeaders.includes("新版 BOM R欄 TPN"));
   assert.ok(dataHeaders.includes("新版客戶 BOM TPN 驗證"));
   const html = buildBomHtmlReport(diffs, "before.xlsx", "after.xlsx", context);
   assert.match(html, /客戶 BOM TPN 對應/);
+  assert.match(html, /BOM S欄關聯/);
   assert.match(html, /CUST-001/);
   assert.match(html, /MVA 製程顆數/);
   assert.match(html, /SMT Top/);
