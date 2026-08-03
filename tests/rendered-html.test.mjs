@@ -615,8 +615,20 @@ test("filters and sorts customer BOM TPN mapping rows by status", async () => {
   assert.match(page, /依狀態名稱/);
   assert.match(page, /依公司料號/);
   assert.match(page, /customerStatusPriority/);
+  assert.match(page, /匯入 TPN/);
+  assert.doesNotMatch(page, /> 客戶 BOM TPN 對應 <span/);
   assert.match(styles, /\.customer-table-controls/);
   assert.match(styles, /\.customer-filter-summary/);
+});
+
+test("blocks customer BOM import until the matching company BOM is imported", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /function hasImportedCompanyBom/);
+  assert.match(page, /beforeAudit && before\.length/);
+  assert.match(page, /afterAudit && after\.length/);
+  assert.match(page, /請先匯入\$\{version\}公司 BOM，才能匯入\$\{version\}客戶 BOM。/);
+  assert.match(page, /requestCustomerBomImport\("before"\)/);
+  assert.match(page, /requestCustomerBomImport\("after"\)/);
 });
 
 test("keeps parsing after columns are inserted, removed, or reordered", () => {
@@ -1002,6 +1014,23 @@ test("locks the local app to same-origin resources and disables sensitive permis
   assert.match(page, /在線路圖定位/);
 });
 
+test("falls back to a local PDF compatibility mode with actionable errors", async () => {
+  const [viewer, css] = await Promise.all([
+    readFile(new URL("../app/pdf-schematic-viewer.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  assert.match(viewer, /pdfjs-dist\/legacy\/build\/pdf\.mjs/);
+  assert.match(viewer, /legacy\/build\/pdf\.worker\.min\.mjs\?url/);
+  assert.match(viewer, /PDF_LOAD_TIMEOUT_MS/);
+  assert.match(viewer, /瀏覽器版本較舊，已自動切換 PDF 相容模式/);
+  assert.match(viewer, /PDF Worker 被瀏覽器或公司資安政策阻擋/);
+  assert.match(viewer, /PDF 已加密或需要密碼/);
+  assert.match(viewer, /PDF 檔案損壞或格式不完整/);
+  assert.match(viewer, /PDF 無法載入/);
+  assert.match(css, /\.pdf-status\.compatibility/);
+  assert.match(css, /\.pdf-error-state/);
+});
+
 test("supports collapsing the desktop sidebar without changing the mobile menu", async () => {
   const [page, css] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
@@ -1018,10 +1047,11 @@ test("supports collapsing the desktop sidebar without changing the mobile menu",
 });
 
 test("includes offline launchers and GitHub-built Windows packages", async () => {
-  const [macLauncher, windowsLauncher, portableBuilder, offlineServer, installer, workflow, packageJson] = await Promise.all([
+  const [macLauncher, windowsLauncher, portableBuilder, iconVerifier, offlineServer, installer, workflow, packageJson] = await Promise.all([
     readFile(new URL("../scripts/start-offline.command", import.meta.url), "utf8"),
     readFile(new URL("../scripts/start-offline.bat", import.meta.url), "utf8"),
     readFile(new URL("../scripts/build-windows-portable.ps1", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/verify-windows-icon.ps1", import.meta.url), "utf8"),
     readFile(new URL("../scripts/offline-server.mjs", import.meta.url), "utf8"),
     readFile(new URL("../scripts/BOMLens.iss", import.meta.url), "utf8"),
     readFile(new URL("../.github/workflows/build-windows.yml", import.meta.url), "utf8"),
@@ -1036,6 +1066,10 @@ test("includes offline launchers and GitHub-built Windows packages", async () =>
   assert.match(portableBuilder, /BOMLens\.ico/);
   assert.match(portableBuilder, /\/win32icon:/);
   assert.match(portableBuilder, /Icon\.ExtractAssociatedIcon/);
+  assert.match(portableBuilder, /verify-windows-icon\.ps1/);
+  assert.match(iconVerifier, /Icon\]::ExtractAssociatedIcon/);
+  assert.match(iconVerifier, /differenceRatio/);
+  assert.match(iconVerifier, /Windows icon 驗證通過/);
   assert.match(portableBuilder, /Compress-Archive/);
   assert.match(portableBuilder, /BOMLens-Windows-x64-Portable\.zip/);
   assert.match(portableBuilder, /offline-server\.mjs/);
@@ -1056,6 +1090,7 @@ test("includes offline launchers and GitHub-built Windows packages", async () =>
   assert.match(workflow, /Stylesheet 內容不完整/);
   assert.match(workflow, /\\\.app-shell/);
   assert.match(workflow, /Verify setup installer/);
+  assert.equal((workflow.match(/verify-windows-icon\.ps1/g) ?? []).length, 3);
   assert.match(packageJson, /package:windows/);
   assert.match(windowsLauncher, /Invoke-WebRequest/);
   assert.match(windowsLauncher, /call npm run offline:serve/);

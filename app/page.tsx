@@ -337,6 +337,21 @@ export default function Home() {
     setPendingCustomerImport({ side, fileName: file.name, sheets, sheetIndex, headerIndex, mapping: detectCustomerColumns(matrix[headerIndex] ?? []) });
   }
 
+  function hasImportedCompanyBom(side: "before" | "after") {
+    return side === "before"
+      ? Boolean(beforeAudit && before.length)
+      : Boolean(afterAudit && after.length);
+  }
+
+  function requestCustomerBomImport(side: "before" | "after") {
+    const version = side === "before" ? "舊版" : "新版";
+    if (!hasImportedCompanyBom(side)) {
+      window.alert(`請先匯入${version}公司 BOM，才能匯入${version}客戶 BOM。`);
+      return;
+    }
+    (side === "before" ? customerBeforeInput : customerAfterInput).current?.click();
+  }
+
   async function loadPlacement(file: File, side: "before" | "after") {
     const { sheets } = await readWorkbook(file);
     const candidateIndex = sheets.findIndex((sheet) => findPlacementHeader(sheet.matrix) >= 0);
@@ -396,6 +411,12 @@ export default function Home() {
   function handleSupplementalFile(event: ChangeEvent<HTMLInputElement>, side: "before" | "after", kind: "customer" | "placement") {
     const file = event.target.files?.[0];
     if (!file) return;
+    if (kind === "customer" && !hasImportedCompanyBom(side)) {
+      const version = side === "before" ? "舊版" : "新版";
+      window.alert(`請先匯入${version}公司 BOM，才能匯入${version}客戶 BOM。`);
+      event.target.value = "";
+      return;
+    }
     const loader = kind === "customer" ? loadCustomerBom : loadPlacement;
     loader(file, side).catch(() => window.alert("檔案讀取失敗，請改用 XLSX、XLS、CSV 或 TSV 格式。"));
     event.target.value = "";
@@ -552,7 +573,7 @@ export default function Home() {
           </section>
 
           <section className="panel">
-            <div className="tabs"><button className={tab === "bom" ? "active" : ""} onClick={() => setTab("bom")}><FileSpreadsheet size={18} /> BOM 差異 <span>{changedDiffs.length}</span></button><button className={tab === "customer" ? "active" : ""} onClick={() => setTab("customer")}><Link2 size={18} /> 客戶 BOM TPN 對應 <span>{(customerBeforeResult?.counts.matched ?? 0) + (customerAfterResult?.counts.matched ?? 0)}</span></button><button className={tab === "schematic" ? "active" : ""} onClick={() => setTab("schematic")}><CircuitBoard size={18} /> 線路圖比對</button></div>
+            <div className="tabs"><button className={tab === "bom" ? "active" : ""} onClick={() => setTab("bom")}><FileSpreadsheet size={18} /> BOM 差異 <span>{changedDiffs.length}</span></button><button className={tab === "customer" ? "active" : ""} onClick={() => setTab("customer")}><Link2 size={18} /> 匯入 TPN <span>{(customerBeforeResult?.counts.matched ?? 0) + (customerAfterResult?.counts.matched ?? 0)}</span></button><button className={tab === "schematic" ? "active" : ""} onClick={() => setTab("schematic")}><CircuitBoard size={18} /> 線路圖比對</button></div>
 
             {tab === "bom" ? <>
               <div className="table-tools">
@@ -606,8 +627,8 @@ export default function Home() {
               afterName={customerAfterName}
               before={customerBeforeResult}
               after={customerAfterResult}
-              onBefore={() => customerBeforeInput.current?.click()}
-              onAfter={() => customerAfterInput.current?.click()}
+              onBefore={() => requestCustomerBomImport("before")}
+              onAfter={() => requestCustomerBomImport("after")}
               onClearBefore={() => { setCustomerBeforeRecords(null); setCustomerBeforeName(""); }}
               onClearAfter={() => { setCustomerAfterRecords(null); setCustomerAfterName(""); }}
             /> : <SchematicPanel beforeUrl={sheetBefore} afterUrl={sheetAfter} beforeFile={sheetBeforeFile} afterFile={sheetAfterFile} beforeName={sheetBeforeName} afterName={sheetAfterName} target={schematicTarget} onTargetChange={setSchematicTarget} diffImage={diffImage} busy={imageBusy} diffs={changedDiffs} onFile={handleSheetFile} />}
@@ -718,7 +739,7 @@ function CustomerMappingTable({ version, result }: { version: "舊版" | "新版
   const availableStatuses = customerStatusPriority.filter((status) => result.counts[status] > 0);
   return <div className="customer-table-wrap">
     <div className="customer-table-title"><strong>公司 BOM 主料／替料 TPN 對應</strong><small>每顆料獨立配對；同 MPN 以 Location 集合判斷實際 TPN</small></div>
-    <div className="customer-table-controls" aria-label="客戶 BOM TPN 對應篩選與排序">
+    <div className="customer-table-controls" aria-label="匯入 TPN 篩選與排序">
       <div className="customer-filter-summary"><Filter size={14} /><span>顯示 <strong>{alternativeRows.length}</strong>／{result.alternativeRows.length} 筆</span></div>
       <label><span>狀態</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as CustomerStatusFilter)}>
         <option value="all">全部狀態（{result.alternativeRows.length}）</option>

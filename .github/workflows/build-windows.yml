@@ -47,7 +47,9 @@ jobs:
           $root = Resolve-Path "release/BOMLens-Windows-x64-Portable"
           $node = Join-Path $root "runtime/node.exe"
           $serverEntry = Join-Path $root "offline-server.mjs"
-          if (-not (Test-Path (Join-Path $root "BOMLens.exe"))) { throw "BOMLens.exe 不存在。" }
+          $portableExe = Join-Path $root "BOMLens.exe"
+          if (-not (Test-Path $portableExe)) { throw "BOMLens.exe 不存在。" }
+          ./scripts/verify-windows-icon.ps1 -ExecutablePath $portableExe -IconPath "public/BOMLens.ico"
           $server = Start-Process -FilePath $node -ArgumentList @($serverEntry) -WorkingDirectory $root -WindowStyle Hidden -PassThru
           try {
             $ready = $false
@@ -94,10 +96,12 @@ jobs:
         shell: pwsh
         run: |
           $setup = Resolve-Path "release/BOMLens-Setup-x64.exe"
+          ./scripts/verify-windows-icon.ps1 -ExecutablePath $setup -IconPath "public/BOMLens.ico"
           $process = Start-Process -FilePath $setup -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "安裝程式測試失敗，ExitCode=$($process.ExitCode)" }
           $installed = Join-Path $env:LOCALAPPDATA "Programs/BOMLens/BOMLens.exe"
           if (-not (Test-Path $installed)) { throw "安裝後找不到 BOMLens.exe。" }
+          ./scripts/verify-windows-icon.ps1 -ExecutablePath $installed -IconPath "public/BOMLens.ico"
 
       - name: Create checksums
         shell: pwsh

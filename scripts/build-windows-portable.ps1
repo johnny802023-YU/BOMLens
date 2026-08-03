@@ -100,6 +100,7 @@ $launcherSource | Set-Content $launcherSourceFile -Encoding UTF8
 & $compiler /nologo /target:winexe /platform:x64 "/out:$launcher" "/win32icon:$appIcon" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll $launcherSourceFile
 if ($LASTEXITCODE -ne 0) { throw "BOMLens.exe 編譯失敗。" }
 Remove-Item $launcherSourceFile -Force
+& (Join-Path $PSScriptRoot "verify-windows-icon.ps1") -ExecutablePath $launcher -IconPath $appIcon
 
 if ($CertificateThumbprint) {
   $certificate = Get-ChildItem "Cert:\CurrentUser\My\$CertificateThumbprint" -ErrorAction Stop
