@@ -718,6 +718,8 @@ function matchMetadata(before: BomItem | undefined, after: BomItem | undefined, 
   const sameStructure = structureCompatible(before, after) && (before.structureKind ?? "flat") !== "flat";
   const reasons = [
     processChange ? `同一料號跨製程架構移動（${processChange.before} → ${processChange.after}）` : "",
+    ambiguous ? "存在分數接近的多個候選群組" : "",
+    !ambiguous && confidence === "low" ? "配對證據不足" : "",
     sameStructure ? "所屬架構相同" : "",
     samePositions ? "插件位置完全相同" : overlappingPositions ? "部分插件位置相同" : "",
     sameParts ? "料號重疊" : "",

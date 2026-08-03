@@ -281,13 +281,14 @@ tbody tr:nth-last-child(-n+2) .confidence-popover:hover .confidence-tooltip, tbo
 .part-absence.not-existed { border-color: #c8e7d9; background: #f1faf6; color: #197454; }.part-absence.not-existed > span { background: #dff3e9; }
 .part-absence.removed { border-color: #efcece; background: #fff5f5; color: #a84848; }.part-absence.removed > span { background: #f8dfdf; }
 .position-list { display: flex; align-items: flex-start; gap: 4px; flex-wrap: wrap; }
-.position-list.unchanged small { width: 100%; color: #7d8797; font-size: 9px; }
+.position-list > small { width: 100%; color: #7d8797; font-size: 9px; }
 .position-chip { padding: 4px 6px; border: 0; border-radius: 4px; font-family: var(--font-geist-mono); font-size: 10px; font-weight: 700; cursor: zoom-in; }
 .position-chip:hover { outline: 2px solid #a9c3f9; outline-offset: 1px; }
 .position-chip.added { color: #147a56; background: #e8f7f0; }
 .position-chip.removed { color: #b14949; background: #fff0f0; }
 .position-chip.changed { color: #9a651b; background: #fff3dc; }
 .position-chip.neutral { color: #46658f; background: #edf3fb; }
+.position-overflow { height: 24px; padding: 0 7px; display: inline-flex; align-items: center; border: 1px dashed #ccd6e4; border-radius: 4px; background: #f7f9fc; color: #637086; font-size: 9px; font-weight: 750; white-space: nowrap; }
 .row-arrow { color: #a5adba; }
 .qty { color: #677386; font-family: var(--font-geist-mono); font-size: 11px; }
 .changed-qty { color: #a2660c; background: #fff6e6; padding: 4px 6px; border-radius: 4px; }
@@ -321,6 +322,8 @@ tbody tr:nth-last-child(-n+2) .confidence-popover:hover .confidence-tooltip, tbo
 .detail-metrics > span { color: #9ba6b5; }
 .detail-section { margin-top: 11px; padding: 15px; border: 1px solid #e1e6ed; border-radius: 9px; background: white; }
 .detail-section h3 { margin: 0 0 11px; color: #4b586b; font-size: 11px; }
+.detail-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.detail-section-heading small { color: #7c8797; font-size: 9px; }
 .structure-value { margin: 0; color: #46658f; font-family: var(--font-geist-mono); font-size: 10px; line-height: 1.55; overflow-wrap: anywhere; }
 .detail-version-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
 .detail-version-grid article { min-width: 0; padding: 10px; border: 1px solid #e6e9ef; border-radius: 7px; background: #fafbfc; }
@@ -330,10 +333,19 @@ tbody tr:nth-last-child(-n+2) .confidence-popover:hover .confidence-tooltip, tbo
 .detail-positions { display: flex; flex-wrap: wrap; gap: 6px; }
 .detail-positions button { height: 31px; padding: 0 9px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid #cfdcf1; border-radius: 6px; background: #f2f6fd; color: #3b65a8; font-family: var(--font-geist-mono); font-size: 10px; font-weight: 750; }
 .detail-positions button:hover { border-color: #89aae2; background: #eaf1fd; }
+.detail-position-toggle { margin-top: 9px; height: 31px; padding: 0 10px; border: 1px solid #d6deea; border-radius: 6px; background: white; color: #4f6688; font-size: 10px; font-weight: 750; }
+.detail-position-toggle:hover { border-color: #9db3d7; background: #f5f8fd; }
 .detail-empty { margin: 0; color: #9aa3b0; font-size: 10px; }
 .review-reason { border-color: #ecd7b2; background: #fffbf2; }
 .review-reason h3 { display: flex; align-items: center; gap: 6px; color: #8d641f; }
 .review-reason p { margin: 0; color: #79684a; font-size: 10px; line-height: 1.55; }
+.review-guidance-grid { display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 7px; }
+.review-guidance-grid > div { padding: 9px; display: flex; flex-direction: column; gap: 4px; border: 1px solid #ecd9b7; border-radius: 6px; background: rgba(255,255,255,.72); }
+.review-guidance-grid small { color: #92754a; font-size: 8px; font-weight: 750; }
+.review-guidance-grid strong { color: #71521e; font-size: 10px; }
+.review-explanation, .review-checklist { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #e6cfaa; }
+.review-explanation > strong, .review-checklist > strong { display: block; margin-bottom: 4px; color: #805d24; font-size: 9px; }
+.review-checklist ol { margin: 5px 0 0; padding-left: 18px; color: #79684a; font-size: 10px; line-height: 1.65; }
 .detail-drawer > footer { min-height: 65px; padding: 12px 17px; display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--line); background: white; }
 .detail-drawer > footer button { height: 36px; padding: 0 13px; border-radius: 6px; display: inline-flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 750; }
 

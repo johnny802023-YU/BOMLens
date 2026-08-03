@@ -593,6 +593,14 @@ test("shows explicit manual review and enlarged schematic controls", async () =>
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
   assert.match(page, /人工待審核/);
+  assert.match(page, /存在多個接近候選/);
+  assert.match(page, /系統判斷依據/);
+  assert.match(page, /不確認的風險/);
+  assert.match(page, /建議確認順序/);
+  assert.match(page, /顯示全部 \$\{positions\.length\} 個位置/);
+  assert.match(page, /previewLimit = 6/);
+  assert.match(styles, /\.position-overflow/);
+  assert.match(styles, /\.review-guidance-grid/);
   assert.match(page, /reviewDiffs\.length/);
   assert.match(page, /setImpactFilter\(impactFilter === "review" \? "all" : "review"\)/);
   assert.match(page, /放大顯示/);

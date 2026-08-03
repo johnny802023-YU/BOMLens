@@ -809,6 +809,8 @@ function CustomerMappingPanel({ beforeName, afterName, before, after, onBefore, 
 function DiffDetailDrawer({ item, onClose, onLocate }: { item: BomDiff; onClose: () => void; onLocate: (position: string) => void }) {
   const structure = diffStructureLabel(item) || "未標示架構";
   const positions = [...new Set([...(item.replacementPositions ?? []), ...(item.addedPositions ?? []), ...(item.removedPositions ?? []), ...(item.after?.positions ?? []), ...(item.before?.positions ?? [])])];
+  const [showAllPositions, setShowAllPositions] = useState(false);
+  const visiblePositions = showAllPositions ? positions : positions.slice(0, 24);
   return <div className="detail-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <aside className="detail-drawer" role="dialog" aria-modal="true" aria-labelledby="diff-detail-title">
       <header>
@@ -834,14 +836,46 @@ function DiffDetailDrawer({ item, onClose, onLocate }: { item: BomDiff; onClose:
             <article><span>新版</span><PartList item={item.after} changedParts={item.addedParts} tone="added" /></article>
           </div>
         </section>
-        <section className="detail-section"><h3>插件位置</h3>
-          {positions.length ? <div className="detail-positions">{positions.map((position) => <button type="button" key={position} onClick={() => onLocate(position)} title={`在線路圖定位 ${position}`}><CircuitBoard size={14} />{position}</button>)}</div> : <p className="detail-empty">沒有插件位置資料</p>}
+        <section className="detail-section"><h3 className="detail-section-heading"><span>插件位置</span>{positions.length > 0 && <small>共 {positions.length} 個</small>}</h3>
+          {positions.length ? <><div className="detail-positions">{visiblePositions.map((position) => <button type="button" key={position} onClick={() => onLocate(position)} title={`在線路圖定位 ${position}`}><CircuitBoard size={14} />{position}</button>)}</div>{positions.length > 24 && <button type="button" className="detail-position-toggle" onClick={() => setShowAllPositions((current) => !current)}>{showAllPositions ? "收合插件位置" : `顯示全部 ${positions.length} 個位置`}</button>}</> : <p className="detail-empty">沒有插件位置資料</p>}
         </section>
-        {(item.needsReview || item.matchConfidence === "low") && <section className="detail-section review-reason"><h3><AlertTriangle size={15} /> 待人工確認</h3><p>{item.matchReason}</p></section>}
+        {(item.needsReview || item.matchConfidence === "low") && <ReviewGuidance item={item} />}
       </div>
       <footer><button type="button" className="secondary" onClick={onClose}>關閉</button>{positions[0] && <button type="button" className="primary" onClick={() => onLocate(positions[0])}><CircuitBoard size={15} /> 定位第一個插件位置</button>}</footer>
     </aside>
   </div>;
+}
+
+function ReviewGuidance({ item }: { item: BomDiff }) {
+  const beforePositions = new Set((item.before?.positions ?? []).map((position) => position.trim().toUpperCase()));
+  const overlapCount = (item.after?.positions ?? []).filter((position) => beforePositions.has(position.trim().toUpperCase())).length;
+  const beforeRows = item.before?.sourceRows?.join("、") || "未提供";
+  const afterRows = item.after?.sourceRows?.join("、") || "未提供";
+  const reviewType = item.processChange
+    ? "SMT／DIP 架構移動"
+    : item.matchReason.includes("多個候選")
+      ? "存在多個接近候選"
+      : "配對證據不足";
+  const risk = item.processChange
+    ? "可能是 RD 將料件放入錯誤製程分支，也可能是有意的製程調整。"
+    : "若配錯群組，新增、刪除、替料與數量差異都可能被歸到錯誤料組。";
+  const checklist = [
+    `核對舊版第 ${beforeRows} 列與新版第 ${afterRows} 列是否為同一功能料組。`,
+    `確認所屬架構與插件位置；目前新舊版共有 ${overlapCount} 個相同位置。`,
+    "逐一確認主料、替料及製造廠商料號，不能只依項次名稱判斷。",
+    item.processChange ? "確認由 SMT 移至 DIP（或反向移動）是否為 RD 有意修改。" : "若不是同一料組，應視為各自的新增／刪除，不要接受目前配對。",
+  ];
+  return <section className="detail-section review-reason review-guidance">
+    <h3><AlertTriangle size={15} /> 待人工確認</h3>
+    <div className="review-guidance-grid">
+      <div><small>觸發類型</small><strong>{reviewType}</strong></div>
+      <div><small>配對可信度</small><strong>{item.matchConfidence === "low" ? "低" : item.matchConfidence === "medium" ? "中" : "高"}</strong></div>
+      <div><small>位置重疊</small><strong>{overlapCount} 個</strong></div>
+    </div>
+    <div className="review-explanation"><strong>系統判斷依據</strong><p>{item.matchReason}</p></div>
+    <div className="review-explanation"><strong>不確認的風險</strong><p>{risk}</p></div>
+    <div className="review-checklist"><strong>建議確認順序</strong><ol>{checklist.map((step) => <li key={step}>{step}</li>)}</ol></div>
+  </section>;
 }
 
 function ImportReviewDialog({ pending, onChange, onCancel, onConfirm }: { pending: PendingImport; onChange: (value: PendingImport) => void; onCancel: () => void; onConfirm: () => void }) {
@@ -939,7 +973,7 @@ function PrimaryTypeBadge({ item }: { item: BomDiff }) {
       <span className="confidence-tooltip" role="tooltip">
         {structure && <span><b>所屬架構</b>{structure}</span>}
         <span><b>配對依據</b>{item.matchReason}</span>
-        {item.needsReview && <em>此群組需要人工確認</em>}
+        {item.needsReview && <em>此群組需要人工確認；點擊此列查看證據與確認步驟</em>}
       </span>
     </span>}
   </div>;
@@ -1026,11 +1060,23 @@ function CustomerPartStatus({ alternative, fallbackStatus, fallbackReason }: { a
 }
 
 function PositionSummary({ added, removed, replacement, allPositions, onLocate }: { added: string[]; removed: string[]; replacement: string[]; allPositions: string[]; onLocate: (position: string) => void }) {
-  if (!added.length && !removed.length && !replacement.length) return allPositions.length ? <div className="position-list unchanged"><small>位置未變・點擊定位</small>{allPositions.map((position) => <button className="position-chip neutral" title={`在線路圖定位 ${position}`} onClick={(event) => { event.stopPropagation(); onLocate(position); }} key={`n-${position}`}>{position}</button>)}</div> : <span className="no-change">—</span>;
-  return <div className="position-list">
-    {replacement.map((position) => <button className="position-chip changed" title={`在線路圖定位 ${position}`} onClick={(event) => { event.stopPropagation(); onLocate(position); }} key={`c-${position}`}>{position} 換料</button>)}
-    {added.map((position) => <button className="position-chip added" title={`在線路圖定位 ${position}`} onClick={(event) => { event.stopPropagation(); onLocate(position); }} key={`a-${position}`}>+ {position}</button>)}
-    {removed.map((position) => <button className="position-chip removed" title={`在線路圖定位 ${position}`} onClick={(event) => { event.stopPropagation(); onLocate(position); }} key={`r-${position}`}>− {position}</button>)}
+  const previewLimit = 6;
+  const unchanged = !added.length && !removed.length && !replacement.length;
+  const entries = unchanged
+    ? [...new Set(allPositions)].map((position) => ({ position, tone: "neutral", prefix: "", suffix: "" }))
+    : [
+      ...replacement.map((position) => ({ position, tone: "changed", prefix: "", suffix: " 換料" })),
+      ...added.map((position) => ({ position, tone: "added", prefix: "+ ", suffix: "" })),
+      ...removed.map((position) => ({ position, tone: "removed", prefix: "− ", suffix: "" })),
+    ];
+  if (!entries.length) return <span className="no-change">—</span>;
+  const summary = unchanged
+    ? `位置未變・共 ${entries.length} 個`
+    : [replacement.length ? `換料 ${replacement.length}` : "", added.length ? `新增 ${added.length}` : "", removed.length ? `移除 ${removed.length}` : ""].filter(Boolean).join("・");
+  return <div className={`position-list ${unchanged ? "unchanged" : ""}`}>
+    <small>{summary}・點擊定位</small>
+    {entries.slice(0, previewLimit).map(({ position, tone, prefix, suffix }, index) => <button className={`position-chip ${tone}`} title={`在線路圖定位 ${position}`} onClick={(event) => { event.stopPropagation(); onLocate(position); }} key={`${tone}-${position}-${index}`}>{prefix}{position}{suffix}</button>)}
+    {entries.length > previewLimit && <span className="position-overflow" title="點擊此列可查看完整插件位置">另有 {entries.length - previewLimit} 個・查看詳細</span>}
   </div>;
 }
 
