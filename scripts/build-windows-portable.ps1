@@ -9,10 +9,12 @@ $ProgressPreference = "SilentlyContinue"
 $project = Split-Path -Parent $PSScriptRoot
 $outputRoot = Join-Path $project $OutputDirectory
 $packageRoot = Join-Path $outputRoot "BOMLens-Windows-x64-Portable"
+$appIcon = Join-Path $project "public\BOMLens.ico"
 
 Set-Location $project
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw "建置電腦需要先安裝 Node.js 22 或更新版本。" }
 if (-not (Test-Path "node_modules")) { throw "找不到 node_modules，請先執行 npm ci。" }
+if (-not (Test-Path $appIcon)) { throw "找不到 BOMLens Windows 圖示：$appIcon" }
 
 if (-not $SkipBuild) {
   & npm run build
@@ -66,7 +68,8 @@ public static class BOMLensLauncher {
     var menu = new ContextMenuStrip();
     menu.Items.Add("開啟 BOMLens", null, (s, e) => OpenBrowser());
     menu.Items.Add("結束", null, (s, e) => Application.Exit());
-    var tray = new NotifyIcon { Icon = SystemIcons.Shield, Text = "BOMLens 離線模式", Visible = true, ContextMenuStrip = menu };
+    var trayIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application;
+    var tray = new NotifyIcon { Icon = trayIcon, Text = "BOMLens 離線模式", Visible = true, ContextMenuStrip = menu };
     tray.DoubleClick += (s, e) => OpenBrowser();
     new Thread(() => {
       for (int i = 0; i < 40; i++) {
@@ -75,7 +78,12 @@ public static class BOMLensLauncher {
       }
       MessageBox.Show("BOMLens 本機服務啟動逾時，請重新啟動程式。", "BOMLens", MessageBoxButtons.OK, MessageBoxIcon.Warning);
     }) { IsBackground = true }.Start();
-    Application.ApplicationExit += (s, e) => { tray.Visible = false; try { if (server != null && !server.HasExited) server.Kill(); } catch {} };
+    Application.ApplicationExit += (s, e) => {
+      tray.Visible = false;
+      tray.Dispose();
+      trayIcon.Dispose();
+      try { if (server != null && !server.HasExited) server.Kill(); } catch {}
+    };
     Application.Run();
   }
   private static void OpenBrowser() {
@@ -89,7 +97,7 @@ $launcherSourceFile = Join-Path $outputRoot "BOMLensLauncher.cs"
 $compiler = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 if (-not (Test-Path $compiler)) { throw "找不到 Windows 64 位元 C# 編譯器：$compiler" }
 $launcherSource | Set-Content $launcherSourceFile -Encoding UTF8
-& $compiler /nologo /target:winexe /platform:x64 "/out:$launcher" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll $launcherSourceFile
+& $compiler /nologo /target:winexe /platform:x64 "/out:$launcher" "/win32icon:$appIcon" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll $launcherSourceFile
 if ($LASTEXITCODE -ne 0) { throw "BOMLens.exe 編譯失敗。" }
 Remove-Item $launcherSourceFile -Force
 

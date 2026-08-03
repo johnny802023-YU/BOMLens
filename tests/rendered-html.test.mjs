@@ -5,6 +5,7 @@ import { analyzeCompanyBomMatrix, bomDiffDisplayFields, bomProcessKind, canonica
 import { buildPageReferenceIndex, centeredPdfHitScroll, centeredRenderedHitScroll, findReferenceHits, lookupReferenceHits, normalizeReference } from "../app/pdf-search.ts";
 import { calculateMva, detectCustomerColumns, detectPlacementColumns, mapCustomerBom, parseCustomerBomMatrix, parsePlacementMatrix } from "../app/supplemental-logic.ts";
 import { createSchematicReportPlan } from "../app/schematic-report-logic.ts";
+import { parseWorkbookData } from "../app/workbook-import.ts";
 import ExcelJS from "exceljs";
 import * as XLSX from "xlsx";
 
@@ -30,10 +31,11 @@ test("server-renders the BOM comparison workspace", async () => {
   assert.match(html, /BOM 差異/);
   assert.match(html, /料號異動/);
   assert.match(html, /插件位置差異/);
-  assert.match(html, /依標題名稱自動定位欄位/);
+  assert.match(html, /比對規則/);
+  assert.match(html, /S／R 欄自動辨識/);
   assert.match(html, /主要異動/);
   assert.match(html, /差異項目/);
-  assert.match(html, /新版加入的主料或替料/);
+  assert.match(html, /只存在新版，需要確認採購與插件位置/);
   assert.match(html, /插件位置、數量或同位置換料/);
   assert.match(html, /新版完全新料/);
   assert.match(html, /新版完全移除/);
@@ -66,9 +68,9 @@ test("ships real BOM parsing, comparison, and export behavior", async () => {
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
-  assert.match(page, /XLSX\.read/);
+  assert.match(page, /parseWorkbookData/);
   assert.match(page, /analyzeCompanyBomMatrix/);
-  assert.match(page, /book\.SheetNames\.map/);
+  assert.match(page, /const \{ book, sheets \} = parseWorkbookData\(data\)/);
   assert.match(page, /待人工確認/);
   assert.match(page, /selectedFields\.some\(\(field\) => item\.fields\.includes\(field\)\)/);
   assert.match(page, /差異項目（可複選）/);
@@ -524,6 +526,69 @@ test("defaults to the company field names without numeric prefixes", () => {
   assert.equal(mapping.manufacturerPart, 5);
 });
 
+test("automatically selects the S column named 廠商/料號及型號", () => {
+  const header = Array(19).fill("");
+  header[0] = "項次";
+  header[1] = "主件料號";
+  header[4] = "組成用量";
+  header[5] = "插件位置";
+  header[17] = "對應客戶料號";
+  header[18] = "廠商/料號及型號";
+  const mapping = detectCompanyColumns(header);
+  assert.equal(mapping.customerPartNumbers, 17);
+  assert.equal(mapping.customerPartAssociations, 18);
+
+  header[18] = "廠商／料號及型號";
+  assert.equal(detectCompanyColumns(header).customerPartAssociations, 18);
+});
+
+test("reads HTML content saved with an .xls extension and still detects the S column", () => {
+  const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><table>
+    <tr><th>項次</th><th>主件料號</th><th>組成用量</th><th>插件位置</th><th>製造廠商料號</th><th>對應客戶料號</th><th>廠商/料號及型號</th></tr>
+    <tr><td>001</td><td>0704-06HL0ZY</td><td>1</td><td>Q33</td><td>SSM3K361R_LXHF</td><td>2156321-00-A</td><td>TOSHIBA/SSM3K361R_LXHF</td></tr>
+  </table></body></html>`;
+  const parsedWorkbook = parseWorkbookData(new TextEncoder().encode(html).buffer);
+  assert.equal(parsedWorkbook.sourceFormat, "html-xls");
+  assert.equal(parsedWorkbook.sheets.length, 1);
+  const header = parsedWorkbook.sheets[0].matrix[0];
+  assert.equal(detectCompanyColumns(header).customerPartAssociations, 6);
+  const items = parseCompanyBomMatrix(parsedWorkbook.sheets[0].matrix);
+  assert.equal(items[0].alternatives[0].part, "0704-06HL0ZY");
+  assert.equal(items[0].alternatives[0].rdCustomerPartAssociations[0].manufacturerPart, "SSM3K361R_LXHF");
+});
+
+test("reads a real legacy BIFF8 .xls workbook", () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+    ["項次", "主件料號", "組成用量", "插件位置", "製造廠商料號", "對應客戶料號", "廠商／料號及型號"],
+    ["001", "0704-06HL0ZY", 1, "Q33", "SSM3K361R_LXHF", "2156321-00-A", "TOSHIBA/SSM3K361R_LXHF"],
+  ]), "ProductStructureReport");
+  const binary = XLSX.write(workbook, { type: "array", bookType: "biff8" });
+  const parsedWorkbook = parseWorkbookData(binary);
+  assert.equal(parsedWorkbook.sourceFormat, "excel-binary");
+  assert.equal(parsedWorkbook.sheets[0].name, "ProductStructureReport");
+  assert.equal(detectCompanyColumns(parsedWorkbook.sheets[0].matrix[0]).customerPartAssociations, 6);
+  assert.equal(parseCompanyBomMatrix(parsedWorkbook.sheets[0].matrix)[0].positions[0], "Q33");
+});
+
+test("compresses setup controls and strengthens added and removed states", async () => {
+  const [page, styles] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  assert.match(page, /comparison-setup/);
+  assert.match(page, /setRulesOpen/);
+  assert.match(page, /setMvaOpen/);
+  assert.doesNotMatch(page, /className="new-compare"/);
+  assert.match(page, /舊版不存在/);
+  assert.match(page, /新版已移除/);
+  assert.match(page, /part-absence/);
+  assert.match(styles, /\.comparison-setup/);
+  assert.match(styles, /\.group-status-card/);
+  assert.match(styles, /\.part-absence/);
+  assert.match(styles, /\.primary-badge[^}]*min-width: 60px/);
+});
+
 test("shows explicit manual review and enlarged schematic controls", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
@@ -536,6 +601,22 @@ test("shows explicit manual review and enlarged schematic controls", async () =>
   assert.match(page, /exportSchematicPdfReport/);
   assert.match(styles, /\.schematic-panel\.expanded/);
   assert.match(styles, /\.schematic-report-progress/);
+});
+
+test("filters and sorts customer BOM TPN mapping rows by status", async () => {
+  const [page, styles] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  assert.match(page, /CustomerStatusFilter/);
+  assert.match(page, /全部狀態/);
+  assert.match(page, /需處理/);
+  assert.match(page, /異常優先/);
+  assert.match(page, /依狀態名稱/);
+  assert.match(page, /依公司料號/);
+  assert.match(page, /customerStatusPriority/);
+  assert.match(styles, /\.customer-table-controls/);
+  assert.match(styles, /\.customer-filter-summary/);
 });
 
 test("keeps parsing after columns are inserted, removed, or reordered", () => {
@@ -952,6 +1033,9 @@ test("includes offline launchers and GitHub-built Windows packages", async () =>
   assert.match(portableBuilder, /runtime\\node\.exe/);
   assert.match(portableBuilder, /Framework64\\v4\.0\.30319\\csc\.exe/);
   assert.match(portableBuilder, /\/platform:x64/);
+  assert.match(portableBuilder, /BOMLens\.ico/);
+  assert.match(portableBuilder, /\/win32icon:/);
+  assert.match(portableBuilder, /Icon\.ExtractAssociatedIcon/);
   assert.match(portableBuilder, /Compress-Archive/);
   assert.match(portableBuilder, /BOMLens-Windows-x64-Portable\.zip/);
   assert.match(portableBuilder, /offline-server\.mjs/);
@@ -962,6 +1046,8 @@ test("includes offline launchers and GitHub-built Windows packages", async () =>
   assert.match(offlineServer, /text\/css; charset=utf-8/);
   assert.match(installer, /PrivilegesRequired=lowest/);
   assert.match(installer, /\{autodesktop\}/);
+  assert.match(installer, /SetupIconFile=.*BOMLens\.ico/);
+  assert.match(installer, /IconFilename: "\{app\}\\\{#MyAppExeName\}"/);
   assert.match(installer, /BOMLens-Setup-x64/);
   assert.match(workflow, /runs-on: windows-latest/);
   assert.match(workflow, /actions\/setup-node@v4/);

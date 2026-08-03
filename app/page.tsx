@@ -29,6 +29,7 @@ import {
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import type { OriginalBomSource } from "./export-report";
+import { parseWorkbookData } from "./workbook-import";
 import { clearInactivePdfCache, PdfSchematicViewer, type PdfScrollSync, type PdfViewerSide } from "./pdf-schematic-viewer";
 import {
   canonicalPartNumber,
@@ -76,6 +77,9 @@ import {
 type FieldFilter = "新增料號" | "新增替料" | "新增插件位置" | "刪除料號" | "刪除替料" | "移除插件位置" | "更換料號" | "製程別放置異常";
 type ImpactFilter = "all" | "purchase" | "deleted" | "review";
 type DiffGroupKey = "added" | "removed" | "changed" | "review";
+type CustomerMappingRowStatus = CustomerMappingResult["alternativeRows"][number]["status"];
+type CustomerStatusFilter = "all" | "action" | CustomerMappingRowStatus;
+type CustomerStatusSort = "priority" | "status" | "part";
 
 type ImportSheet = { name: string; matrix: unknown[][] };
 type PendingImport = {
@@ -127,8 +131,8 @@ const primaryTypeLabels: Record<DiffPrimaryType, string> = {
 };
 
 const diffGroupMeta: Array<{ key: DiffGroupKey; label: string; description: string }> = [
-  { key: "added", label: "新增", description: "新版加入的主料或替料" },
-  { key: "removed", label: "刪除", description: "新版移除的主料或替料" },
+  { key: "added", label: "新增料號／替料", description: "只存在新版，需要確認採購與插件位置" },
+  { key: "removed", label: "刪除料號／替料", description: "新版已移除，需要確認停用與庫存影響" },
   { key: "changed", label: "變更", description: "插件位置、數量或同位置換料；另偵測 SMT／DIP 製程別異動" },
   { key: "review", label: "待人工確認", description: "配對不明確或料號跨 SMT／DIP 架構，需要人工判斷" },
 ];
@@ -246,6 +250,8 @@ export default function Home() {
   const [schematicTarget, setSchematicTarget] = useState("");
   const [selectedDiff, setSelectedDiff] = useState<BomDiff | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<DiffGroupKey[]>([]);
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const [mvaOpen, setMvaOpen] = useState(false);
   const beforeInput = useRef<HTMLInputElement>(null);
   const afterInput = useRef<HTMLInputElement>(null);
   const customerBeforeInput = useRef<HTMLInputElement>(null);
@@ -300,11 +306,11 @@ export default function Home() {
 
   async function readWorkbook(file: File) {
     const data = await file.arrayBuffer();
-    const book = XLSX.read(data, { type: "array", cellStyles: true, cellNF: true, cellDates: true });
+    const { book, sheets } = parseWorkbookData(data);
     return {
       data,
       book,
-      sheets: book.SheetNames.map((name) => ({ name, matrix: XLSX.utils.sheet_to_json<unknown[]>(book.Sheets[name], { header: 1, defval: "", raw: false }) })),
+      sheets,
     };
   }
 
@@ -380,14 +386,6 @@ export default function Home() {
       setPlacementAfterRecords(records); setPlacementAfterName(pendingPlacementImport.fileName);
     }
     setPendingPlacementImport(null);
-  }
-
-  function resetComparison() {
-    setBefore([]); setAfter([]); setBeforeName(""); setAfterName(""); setBeforeAudit(null); setAfterAudit(null); setOriginalBefore(null); setOriginalAfter(null);
-    setQuery(""); setSelectedFields([]); setImpactFilter("all"); setSelectedDiff(null); setCollapsedGroups([]); setTab("bom");
-    setCustomerBeforeRecords(null); setCustomerAfterRecords(null); setCustomerBeforeName(""); setCustomerAfterName("");
-    setPlacementBeforeRecords(null); setPlacementAfterRecords(null); setPlacementBeforeName(""); setPlacementAfterName("");
-    window.setTimeout(() => beforeInput.current?.click(), 0);
   }
 
   function handleBomFile(event: ChangeEvent<HTMLInputElement>, side: "before" | "after") {
@@ -490,7 +488,6 @@ export default function Home() {
       <aside className={`sidebar ${sidebarCollapsed ? "collapsed" : ""} ${mobileNav ? "open" : ""}`}>
         <button className="sidebar-collapse" onClick={() => setSidebarCollapsed((collapsed) => !collapsed)} aria-label={sidebarCollapsed ? "展開側邊選單" : "收折側邊選單"} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? "展開側邊選單" : "收折側邊選單"}>{sidebarCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}</button>
         <div className="brand"><span className="brand-mark"><CircuitBoard size={21} /></span><span className="brand-text">BOM<span>Lens</span></span></div>
-        <button className="new-compare" title="新增比對" onClick={resetComparison}><Plus size={18} /><span className="sidebar-text">新增比對</span></button>
         <nav>
           <p className="nav-label">工作區</p>
           <button className="nav-item active" title="目前比對"><GitCompareArrows size={18} /><span className="sidebar-text">目前比對</span><span className="nav-count">1</span></button>
@@ -511,24 +508,30 @@ export default function Home() {
 
         <div className="content">
           <section className="privacy-banner" role="status"><span><ShieldCheck size={19} /></span><div><strong>離線隱私模式</strong><p>檔案只在這台電腦的瀏覽器記憶體內分析，不會上傳、同步或儲存；關閉頁面後即清除。</p></div><span className="local-only">LOCAL ONLY</span></section>
-          <section className="upload-bar">
-            <div className="upload-title"><UploadCloud size={20} /><div><strong>比對來源</strong><small>選擇檔案後立即在本機完成分析</small></div></div>
-            <div className="file-pair">
-              <div className="file-chip"><button className="file-select" onClick={() => beforeInput.current?.click()}><span className="file-icon"><FileSpreadsheet size={18} /></span><span><small>舊版 BOM</small><strong>{beforeName || "選擇檔案"}</strong></span></button>{beforeName && <button className="chip-x" aria-label="移除舊版 BOM" onClick={() => { setBefore([]); setBeforeName(""); setBeforeAudit(null); setOriginalBefore(null); }}><X size={15} /></button>}</div>
-              <ArrowRight size={18} className="pair-arrow" />
-              <div className="file-chip"><button className="file-select" onClick={() => afterInput.current?.click()}><span className="file-icon after"><FileSpreadsheet size={18} /></span><span><small>新版 BOM</small><strong>{afterName || "選擇檔案"}</strong></span></button>{afterName && <button className="chip-x" aria-label="移除新版 BOM" onClick={() => { setAfter([]); setAfterName(""); setAfterAudit(null); setOriginalAfter(null); }}><X size={15} /></button>}</div>
-              <input ref={beforeInput} hidden type="file" accept=".xlsx,.xls,.csv,.tsv" onChange={(e) => handleBomFile(e, "before")} />
-              <input ref={afterInput} hidden type="file" accept=".xlsx,.xls,.csv,.tsv" onChange={(e) => handleBomFile(e, "after")} />
+          <section className="comparison-setup" aria-label="比對來源、規則與 MVA">
+            <div className="setup-label"><UploadCloud size={17} /><strong>比對來源</strong></div>
+            <div className="setup-file-pair">
+              <div className="file-chip compact"><button className="file-select" onClick={() => beforeInput.current?.click()}><span className="file-icon"><FileSpreadsheet size={17} /></span><span><small>舊版 BOM</small><strong title={beforeName}>{beforeName || "選擇檔案"}</strong></span></button>{beforeName && <button className="chip-x" aria-label="移除舊版 BOM" onClick={() => { setBefore([]); setBeforeName(""); setBeforeAudit(null); setOriginalBefore(null); }}><X size={14} /></button>}</div>
+              <ArrowRight size={16} className="pair-arrow" />
+              <div className="file-chip compact"><button className="file-select" onClick={() => afterInput.current?.click()}><span className="file-icon after"><FileSpreadsheet size={17} /></span><span><small>新版 BOM</small><strong title={afterName}>{afterName || "選擇檔案"}</strong></span></button>{afterName && <button className="chip-x" aria-label="移除新版 BOM" onClick={() => { setAfter([]); setAfterName(""); setAfterAudit(null); setOriginalAfter(null); }}><X size={14} /></button>}</div>
             </div>
+            <button type="button" className={rulesOpen ? "setup-toggle active" : "setup-toggle"} onClick={() => setRulesOpen((open) => !open)} aria-expanded={rulesOpen}>
+              <ShieldCheck size={16} /><span><strong>比對規則</strong><small>S／R 欄自動辨識</small></span>{rulesOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+            </button>
+            <button type="button" className={mvaOpen ? "setup-toggle active" : "setup-toggle"} onClick={() => setMvaOpen((open) => !open)} aria-expanded={mvaOpen}>
+              <Layers size={16} /><span><strong>MVA</strong><small>{mvaBefore || mvaAfter ? `SMT ${(mvaBefore?.smtTop ?? 0) + (mvaBefore?.smtBottom ?? 0)} → ${(mvaAfter?.smtTop ?? 0) + (mvaAfter?.smtBottom ?? 0)}` : "尚未匯入"}</small></span>{mvaOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+            </button>
+            <input ref={beforeInput} hidden type="file" accept=".xlsx,.xls,.csv,.tsv" onChange={(e) => handleBomFile(e, "before")} />
+            <input ref={afterInput} hidden type="file" accept=".xlsx,.xls,.csv,.tsv" onChange={(e) => handleBomFile(e, "after")} />
           </section>
           {(beforeAudit || afterAudit) && <section className="audit-strip" aria-label="匯入檢查摘要">
             {[{ label: "舊版", audit: beforeAudit }, { label: "新版", audit: afterAudit }].map(({ label, audit }) => audit && <div key={label}><ShieldCheck size={16} /><span><strong>{label}匯入完成</strong><small>{audit.sheetName}・{audit.audit.groupCount} 組料・{audit.audit.positionCount} 個位置・{audit.audit.issues.filter((issue) => issue.severity === "warning").length} 項警告</small></span></div>)}
           </section>}
-          <section className="format-strip" aria-label="BOM 欄位規則">
+          {rulesOpen && <section className="format-strip setup-detail" aria-label="BOM 欄位規則">
             <span><b>項次</b> 只切分同架構主替料，不跨版比對</span><span><b>架構</b> 69 → VB-D／60／VB-T／08 PCB</span><span><b>主件料號</b> 取最右 12 碼</span><span><b>數量</b> 一般數量</span><span><b>插件位置</b> 優先計數</span><span><b>製造廠商</b> 僅顯示</span><span><b>製造廠商料號</b> 完全一致驗證</span><span><b>TPN（R／S欄）</b> 先驗證 Location＋MPN，再依 R／S 順序確認 TPN 對應 MPN</span><strong>依標題名稱自動定位欄位</strong>
-          </section>
+          </section>}
 
-          <MvaPanel
+          {mvaOpen && <MvaPanel
             beforeName={placementBeforeName}
             afterName={placementAfterName}
             before={mvaBefore}
@@ -537,7 +540,7 @@ export default function Home() {
             onAfter={() => placementAfterInput.current?.click()}
             onClearBefore={() => { setPlacementBeforeRecords(null); setPlacementBeforeName(""); }}
             onClearAfter={() => { setPlacementAfterRecords(null); setPlacementAfterName(""); }}
-          />
+          />}
           <input ref={placementBeforeInput} hidden type="file" accept=".xlsx,.xls,.csv,.tsv" onChange={(event) => handleSupplementalFile(event, "before", "placement")} />
           <input ref={placementAfterInput} hidden type="file" accept=".xlsx,.xls,.csv,.tsv" onChange={(event) => handleSupplementalFile(event, "after", "placement")} />
 
@@ -567,7 +570,8 @@ export default function Home() {
                     return <tbody className={`diff-group ${group.key}`} key={group.key}>
                       <tr className="diff-group-heading"><td colSpan={8}><button type="button" onClick={() => toggleDiffGroup(group.key)} aria-expanded={!collapsed}>
                         <span className="group-chevron">{collapsed ? <ChevronRight size={15} /> : <ChevronDown size={15} />}</span>
-                        <strong>{group.label}</strong><span className="group-count">{group.items.length}</span><small>{group.description}</small>
+                        <span className="group-status-card"><span className="group-status-icon">{group.key === "added" ? <Plus size={16} /> : group.key === "removed" ? <X size={16} /> : group.key === "review" ? <AlertTriangle size={15} /> : <GitCompareArrows size={15} />}</span><span><strong>{group.label}</strong><small>{group.key === "added" ? "舊版不存在" : group.key === "removed" ? "新版已移除" : group.key === "review" ? "需要人工判斷" : "新舊版皆存在"}</small></span></span>
+                        <span className="group-count">{group.items.length}</span><small className="group-description">{group.description}</small>
                       </button></td></tr>
                       {!collapsed && group.items.map((item, index) => <tr
                         className={`diff-row ${primaryTypeTone(item.primaryType)} ${selectedDiff === item ? "selected" : ""}`}
@@ -662,14 +666,74 @@ function mappingStatusLabel(status: CustomerMappingResult["rows"][number]["statu
   }[status];
 }
 
+const customerStatusPriority: CustomerMappingRowStatus[] = [
+  "ambiguous",
+  "tpn-missing",
+  "missing-mpn",
+  "mpn-unmatched",
+  "location-unmatched",
+  "tpn-association-invalid",
+  "tpn-association-mismatch",
+  "rd-maintenance-mismatch",
+  "rd-maintenance-missing",
+  "matched",
+];
+
+function customerStatusRank(status: CustomerMappingRowStatus) {
+  const rank = customerStatusPriority.indexOf(status);
+  return rank >= 0 ? rank : customerStatusPriority.length;
+}
+
 function CustomerMappingTable({ version, result }: { version: "舊版" | "新版"; result: CustomerMappingResult | null }) {
+  const [statusFilter, setStatusFilter] = useState<CustomerStatusFilter>("all");
+  const [statusSort, setStatusSort] = useState<CustomerStatusSort>("priority");
+  const matchesStatus = (status: CustomerMappingRowStatus) => statusFilter === "all"
+    || (statusFilter === "action" ? status !== "matched" : status === statusFilter);
+  const compareStatusRows = (
+    a: { status: CustomerMappingRowStatus; part?: string },
+    b: { status: CustomerMappingRowStatus; part?: string },
+  ) => {
+    if (statusSort === "priority") {
+      const priority = customerStatusRank(a.status) - customerStatusRank(b.status);
+      if (priority !== 0) return priority;
+    }
+    if (statusSort === "status") {
+      const status = mappingStatusLabel(a.status).localeCompare(mappingStatusLabel(b.status), "zh-TW");
+      if (status !== 0) return status;
+    }
+    return (a.part ?? "").localeCompare(b.part ?? "", "zh-TW", { numeric: true });
+  };
+  const alternativeRows = [...(result?.alternativeRows ?? [])]
+    .filter((row) => matchesStatus(row.status))
+    .sort(compareStatusRows);
+  const unmatchedCustomerRows = [...(result?.rows ?? [])]
+    .filter((row) => row.status === "location-unmatched" || row.status === "mpn-unmatched" || row.status === "missing-mpn" || row.status === "tpn-missing" || row.status === "ambiguous")
+    .filter((row) => matchesStatus(row.status))
+    .sort((a, b) => compareStatusRows(
+      { status: a.status, part: a.record.customerPartNumber },
+      { status: b.status, part: b.record.customerPartNumber },
+    ));
   if (!result) return <div className="customer-empty">{version}客戶 BOM 尚未匯入</div>;
-  const unmatchedCustomerRows = result.rows.filter((row) => row.status === "location-unmatched" || row.status === "mpn-unmatched" || row.status === "missing-mpn" || row.status === "tpn-missing" || row.status === "ambiguous");
+  const actionCount = result.alternativeRows.length - result.counts.matched;
+  const availableStatuses = customerStatusPriority.filter((status) => result.counts[status] > 0);
   return <div className="customer-table-wrap">
     <div className="customer-table-title"><strong>公司 BOM 主料／替料 TPN 對應</strong><small>每顆料獨立配對；同 MPN 以 Location 集合判斷實際 TPN</small></div>
+    <div className="customer-table-controls" aria-label="客戶 BOM TPN 對應篩選與排序">
+      <div className="customer-filter-summary"><Filter size={14} /><span>顯示 <strong>{alternativeRows.length}</strong>／{result.alternativeRows.length} 筆</span></div>
+      <label><span>狀態</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as CustomerStatusFilter)}>
+        <option value="all">全部狀態（{result.alternativeRows.length}）</option>
+        <option value="action">需處理（{actionCount}）</option>
+        {availableStatuses.map((status) => <option value={status} key={status}>{mappingStatusLabel(status)}（{result.counts[status]}）</option>)}
+      </select></label>
+      <label><span>排序</span><select value={statusSort} onChange={(event) => setStatusSort(event.target.value as CustomerStatusSort)}>
+        <option value="priority">異常優先</option>
+        <option value="status">依狀態名稱</option>
+        <option value="part">依公司料號</option>
+      </select></label>
+    </div>
     <table className="customer-table alternative-mapping-table">
       <thead><tr><th>狀態</th><th>角色／公司料號</th><th>公司 MPN</th><th>Location</th><th>客戶 BOM TPN</th><th>BOM R欄 TPN</th><th>BOM S欄關聯</th><th>說明</th></tr></thead>
-      <tbody>{result.alternativeRows.map((row) => <tr className={row.status} key={`${version}-${row.itemIndex}-${row.alternativeIndex}`}>
+      <tbody>{alternativeRows.map((row) => <tr className={row.status} key={`${version}-${row.itemIndex}-${row.alternativeIndex}`}>
         <td><span className={`mapping-status ${row.status}`}>{mappingStatusLabel(row.status)}</span></td>
         <td><span className="part-role">{row.role === "主料" ? "主" : "替"}</span><strong>{row.part || "—"}</strong></td>
         <td className={row.status === "mpn-unmatched" || row.status === "missing-mpn" ? "mismatch" : ""}>{row.manufacturerPart || "—"}</td>
@@ -678,7 +742,7 @@ function CustomerMappingTable({ version, result }: { version: "舊版" | "新版
         <td className={row.status === "rd-maintenance-missing" || row.status === "rd-maintenance-mismatch" ? "mismatch" : ""}>{row.rdCustomerPartNumbers.join("\n") || "空白"}</td>
         <td className={row.status === "tpn-association-mismatch" || row.status === "tpn-association-invalid" ? "mismatch" : ""}>{row.customerAssociationEvidence.join("\n") || (row.status === "matched" ? "未提供 S欄" : "未找到吻合關聯")}</td>
         <td>{row.reason}</td>
-      </tr>)}</tbody>
+      </tr>)}{alternativeRows.length === 0 && <tr><td className="customer-filter-empty" colSpan={8}>此狀態目前沒有資料</td></tr>}</tbody>
     </table>
     {unmatchedCustomerRows.length > 0 && <><div className="customer-table-title warning"><strong>客戶 BOM 未完整對應列</strong><small>下列客戶資料仍有 Location、MPN 或 TPN 問題</small></div>
       <table className="customer-table customer-source-errors">
@@ -887,7 +951,13 @@ function BPartDifference({ item }: { item: BomDiff }) {
 }
 
 function PartList({ item, changedParts, tone }: { item?: BomItem; changedParts: BomAlternative[]; tone: "added" | "removed" }) {
-  if (!item?.alternatives.length) return <span className="no-change">—</span>;
+  if (!item?.alternatives.length) {
+    const removed = tone === "added";
+    return <div className={removed ? "part-absence removed" : "part-absence not-existed"}>
+      <span>{removed ? <X size={16} /> : <Plus size={16} />}</span>
+      <div><strong>{removed ? "新版已移除" : "舊版不存在"}</strong><small>{removed ? "此料號不再出現在新版 BOM" : "此料號由新版 BOM 新增"}</small></div>
+    </div>;
+  }
   const changedKeys = new Set(changedParts.map((part) => `${part.part.trim().toUpperCase()}|${part.manufacturerPart.trim().toUpperCase()}`));
   return <div className="part-list">{item.alternatives.map((alternative, index) => {
     const key = `${alternative.part.trim().toUpperCase()}|${alternative.manufacturerPart.trim().toUpperCase()}`;

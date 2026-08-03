@@ -105,7 +105,16 @@ const aliases = {
   qty: ["qty", "quantity", "count", "數量", "用量", "組成用量"],
   positions: ["placement", "placements", "location", "locations", "插件位置", "位置"],
   customerPartNumbers: ["customer part number", "customer pn", "customer tpn", "tpn", "客戶料號", "客戶 tpn", "對應客戶料號"],
-  customerPartAssociations: ["customer part association", "tpn mpn association", "廠商料號及型態", "廠商/料號及型態", "廠商／料號及型態"],
+  customerPartAssociations: [
+    "customer part association",
+    "tpn mpn association",
+    "廠商料號及型態",
+    "廠商/料號及型態",
+    "廠商／料號及型態",
+    "廠商料號及型號",
+    "廠商/料號及型號",
+    "廠商／料號及型號",
+  ],
 };
 
 type CompanyColumns = {
@@ -146,7 +155,17 @@ const companyHeaderAliases = {
   manufacturerName: ["製造廠商", "11製造廠商", "製造商名稱", "製造商", "manufacturer name", "manufacturer", "mfr"],
   manufacturerPart: ["製造廠商料號", "16製造廠商料號", "製造商料號", "製造商型號", "manufacturer part number", "mpn"],
   customerPartNumbers: ["對應客戶料號", "客戶料號", "客戶 tpn", "customer part number", "customer pn", "customer tpn", "tpn"],
-  customerPartAssociations: ["廠商/料號及型態", "廠商／料號及型態", "廠商料號及型態", "tpn 對應廠商料號", "customer part association", "tpn mpn association"],
+  customerPartAssociations: [
+    "廠商/料號及型態",
+    "廠商／料號及型態",
+    "廠商料號及型態",
+    "廠商/料號及型號",
+    "廠商／料號及型號",
+    "廠商料號及型號",
+    "tpn 對應廠商料號",
+    "customer part association",
+    "tpn mpn association",
+  ],
 };
 
 function text(value: unknown) {
