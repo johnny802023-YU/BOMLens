@@ -36,7 +36,7 @@ test("server-renders the BOM comparison workspace", async () => {
   assert.match(html, /主要異動/);
   assert.match(html, /差異項目/);
   assert.match(html, /只存在新版，需要確認採購與插件位置/);
-  assert.match(html, /插件位置、數量或同位置換料/);
+  assert.match(html, /插件位置、數量、同位置換料或所屬架構異動/);
   assert.match(html, /新版完全新料/);
   assert.match(html, /新版完全移除/);
   assert.match(html, /新增料號/);
@@ -58,6 +58,9 @@ test("server-renders the BOM comparison workspace", async () => {
   assert.match(html, /離線隱私模式/);
   assert.match(html, /不會上傳、同步或儲存/);
   assert.match(html, /PCB_Main_v1\.3\.xlsx/);
+  assert.match(html, /匯出報表語言/);
+  assert.match(html, /中文版/);
+  assert.match(html, /English/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
 });
 
@@ -92,6 +95,8 @@ test("ships real BOM parsing, comparison, and export behavior", async () => {
   assert.match(page, /showConfidence = item\.matchConfidence === "low"/);
   assert.match(page, /exportBomReport/);
   assert.match(page, /exportBomReport\(visible/);
+  assert.match(page, /exportLanguage/);
+  assert.match(page, /value="zh-TW">中文版/);
   assert.doesNotMatch(page, /exportBomHtmlReport\(visible|匯出 HTML/);
   assert.match(page, /getImageData/);
   assert.match(page, /application\/pdf/);
@@ -189,7 +194,7 @@ test("builds a concise formatted Excel difference report", async () => {
   assert.equal(parsed.Sheets["差異摘要"].A13.v, "新版完全移除（1）");
   assert.equal(parsed.Sheets["差異摘要"].A17.v, "數量差異（1）");
   assert.equal(parsed.Sheets["差異摘要"].A19.v, "TPN 差異（0）");
-  assert.equal(parsed.Sheets["差異摘要"].A21.v, "製程別放置異常（0）");
+  assert.equal(parsed.Sheets["差異摘要"].A21.v, "架構／製程變更（0）");
   assert.equal(parsed.Sheets["差異摘要"].A23.v, "僅插件位置差異（0）");
   assert.equal(parsed.Sheets["差異資料"].A1.v, "BOM 差異資料｜依分類分表");
   assert.equal(parsed.Sheets["差異資料"].A4.v, "新版完全新料（1）");
@@ -216,6 +221,22 @@ test("builds a concise formatted Excel difference report", async () => {
   assert.equal(dataSheet.getCell("F10").font.color.argb, "B14949");
   assert.equal(dataSheet.getCell("K10").fill.fgColor.argb, "EDF4FF");
   assert.ok(buffer.byteLength > 5_000);
+
+  const englishWorkbook = buildBomReport(diffs, "before.xlsx", "after.xlsx", {}, "en");
+  const englishSummary = englishWorkbook.getWorksheet("Difference Summary");
+  const englishData = englishWorkbook.getWorksheet("Difference Data");
+  assert.equal(englishSummary.getCell("A1").value, "BOM Difference Comparison Report");
+  assert.equal(englishSummary.getCell("A4").value, "Completely New Parts\n1");
+  assert.equal(englishSummary.getCell("A7").value, "Primary Change");
+  assert.equal(englishSummary.getCell("I7").value, "Old Part Information");
+  assert.equal(englishSummary.getCell("N7").value, "New Part Information");
+  assert.equal(englishSummary.getCell("A10").value, "Changed");
+  assert.equal(englishSummary.getCell("G10").value, "U20 Replacement");
+  assert.equal(englishData.getCell("A1").value, "BOM Difference Data | Grouped by Category");
+  assert.equal(englishData.getCell("A5").value, "Category");
+  assert.equal(englishData.getCell("F5").value, "Old Company Part Number");
+  assert.equal(englishData.getCell("K5").value, "New Company Part Number");
+  assert.equal(englishData.getCell("A6").value, "Completely New Parts");
 });
 
 test("classifies substitute-only export rows without calling them completely new or removed", async () => {
@@ -250,7 +271,7 @@ test("classifies substitute-only export rows without calling them completely new
   const summarySheet = workbook.getWorksheet("差異摘要");
   assert.deepEqual(
     summarySheet.getColumn(1).values.filter((value) => typeof value === "string" && /（\d+）$/.test(value)),
-    ["新版完全新料（1）", "新增替代（1）", "新版完全移除（1）", "刪除替代（1）", "數量差異（1）", "TPN 差異（0）", "製程別放置異常（0）", "僅插件位置差異（1）"],
+    ["新版完全新料（1）", "新增替代（1）", "新版完全移除（1）", "刪除替代（1）", "數量差異（1）", "TPN 差異（0）", "架構／製程變更（0）", "僅插件位置差異（1）"],
   );
   const substituteSectionRow = summarySheet.getColumn(1).values.findIndex((value) => value === "新增替代（1）");
   assert.equal(summarySheet.getCell(`I${substituteSectionRow + 1}`).value, "MAIN");
@@ -586,6 +607,9 @@ test("compresses setup controls and strengthens added and removed states", async
   assert.match(styles, /\.comparison-setup/);
   assert.match(styles, /\.group-status-card/);
   assert.match(styles, /\.part-absence/);
+  assert.match(styles, /\.part-absence \{[^}]*border: 1px dashed #cfd6df/);
+  assert.doesNotMatch(styles, /\.part-absence\.not-existed[^}]*#c8e7d9/);
+  assert.doesNotMatch(styles, /\.part-absence\.removed[^}]*#efcece/);
   assert.match(styles, /\.primary-badge[^}]*min-width: 60px/);
 });
 
@@ -703,7 +727,7 @@ test("still warns when a placement repeats inside the same structure branch", ()
   assert.ok(result.audit.issues.some((issue) => issue.code === "duplicate-position"));
 });
 
-test("compares parent structure rows while pairing children only within the same branch", () => {
+test("uses parent structure rows only for grouping and never reports them as differences", () => {
   const header = ["項次", "料號", "數量", "插件位置"];
   const bom = (rootPart, tPart, dPart) => parseCompanyBomMatrix([
     header,
@@ -720,8 +744,11 @@ test("compares parent structure rows while pairing children only within the same
   const sameT = diffs.find((diff) => diff.before?.structureKind === "vb-t" && diff.before?.ref === "00U");
   assert.equal(sameT?.kind, "same");
   assert.ok(!diffs.some((diff) => diff.before?.structureKind === "vb-t" && diff.after?.structureKind === "vb-d"));
-  assert.ok(diffs.some((diff) => diff.primaryType === "componentRemoved" && diff.before?.structureKind === "root69"));
-  assert.ok(diffs.some((diff) => diff.primaryType === "componentAdded" && diff.after?.structureKind === "root69"));
+  assert.ok(!diffs.some((diff) => diff.before?.isStructure || diff.after?.isStructure));
+  assert.ok(!diffs.some((diff) => diff.before?.structureKind === "root69" || diff.after?.structureKind === "root69"));
+  const changed = diffs.filter((diff) => diff.categories.length > 0);
+  assert.equal(changed.length, 1);
+  assert.equal(changed[0].primaryType, "partReplaced");
 });
 
 test("detects the same part moving between SMT and DIP structures", async () => {
@@ -744,8 +771,9 @@ test("detects the same part moving between SMT and DIP structures", async () => 
   assert.equal(moved.kind, "changed");
   assert.equal(moved.primaryType, "positionChanged");
   assert.deepEqual(moved.processChange, { before: "SMT", after: "DIP" });
-  assert.deepEqual(moved.fields, ["製程別放置異常"]);
-  assert.deepEqual(bomDiffDisplayFields(moved), ["製程別放置異常（SMT → DIP）"]);
+  assert.deepEqual(moved.structureChange, { before: "vb-t", after: "vb-d" });
+  assert.deepEqual(moved.fields, ["架構變更", "製程別放置異常"]);
+  assert.deepEqual(bomDiffDisplayFields(moved), ["架構變更（VB-T → VB-D）", "製程別放置異常（SMT → DIP）"]);
   assert.deepEqual(moved.newParts, []);
   assert.deepEqual(moved.deletedParts, []);
   assert.equal(moved.needsReview, true);
@@ -753,6 +781,43 @@ test("detects the same part moving between SMT and DIP structures", async () => 
 
   const { exportCategories } = await import("../app/export-report.ts");
   assert.deepEqual(exportCategories(moved), ["製程別放置異常"]);
+});
+
+test("reports a 60 to VB-T structure change but ignores VB-T to VB-T", async () => {
+  const header = ["項次", "料號", "數量", "插件位置", "製造商料號"];
+  const bom = (branch) => parseCompanyBomMatrix([
+    header,
+    ["000", "69G14LM12A01", "1", "", "ROOT-MPN"],
+    ["001", branch, "1", "", "BRANCH-MPN"],
+    ["00A", "0500-04WB0ZY", "1", "U20", "FLASH-MPN"],
+  ]);
+
+  const moved = compareBom(bom("60-BOARD000001"), bom("VBG14LM12A01T"))
+    .find((diff) => diff.before?.ref === "00A" && diff.after?.ref === "00A");
+  assert.ok(moved);
+  assert.equal(moved.kind, "changed");
+  assert.equal(moved.primaryType, "positionChanged");
+  assert.deepEqual(moved.structureChange, { before: "board60", after: "vb-t" });
+  assert.equal(moved.processChange, undefined);
+  assert.deepEqual(moved.fields, ["架構變更"]);
+  assert.deepEqual(bomDiffDisplayFields(moved), ["架構變更（60 → VB-T）"]);
+  assert.deepEqual(moved.newParts, []);
+  assert.deepEqual(moved.deletedParts, []);
+  assert.equal(moved.needsReview, true);
+  assert.match(moved.matchReason, /同一料號跨架構移動（60 → VB-T）/);
+
+  const unchanged = compareBom(bom("VBG14LM12A01T"), bom("VB-G14LM12A01T"))
+    .find((diff) => diff.before?.ref === "00A" && diff.after?.ref === "00A");
+  assert.ok(unchanged);
+  assert.equal(unchanged.kind, "same");
+  assert.equal(unchanged.structureChange, undefined);
+
+  const { buildBomReport, exportCategories } = await import("../app/export-report.ts");
+  assert.deepEqual(exportCategories(moved), ["製程別放置異常"]);
+  const workbook = buildBomReport([moved], "before.xlsx", "after.xlsx");
+  assert.equal(workbook.getWorksheet("差異摘要").getColumn(1).values.includes("架構／製程變更（1）"), true);
+  const english = buildBomReport([moved], "before.xlsx", "after.xlsx", {}, "en");
+  assert.equal(english.getWorksheet("Difference Summary").getColumn(1).values.includes("Structure / Process Changes（1）"), true);
 });
 
 test("does not pair different parts merely because they moved between SMT and DIP", () => {
@@ -1168,6 +1233,26 @@ test("splits virtual customer TPN MPN lists separated by double tildes", () => {
   );
 });
 
+test("matches an exact virtual TPN MPN after removing invisible Excel formatting", () => {
+  const company = parseCompanyBomMatrix([
+    ["項次", "主件料號", "組成用量", "插件位置", "製造廠商", "製造廠商料號", "對應客戶料號", "廠商/料號及型號"],
+    ["000", "69-2G126519P03", 1, "", "", "", "", ""],
+    ["00A", "VB-2G126519P03T", 1, "", "", "", "", ""],
+    ["001", "0704-070M0VD", 1, "Q32", "TOSHIBA", "", "2303598-00-A,1062138-00-C", "TOSHIBA/SSM3K318R_LXGF,TOSHIBA/SSM3K318R_LXGF"],
+  ]);
+  const records = parseCustomerBomMatrix([
+    ["PartNumber", "ReferenceDesignator", "MfgPNos"],
+    ["1062138-00-C", "Q32", "UNUSED-MPN~~SSM3K318R＿LXGF\u200B"],
+  ], 0, detectCustomerColumns(["PartNumber", "ReferenceDesignator", "MfgPNos"]));
+
+  const result = mapCustomerBom(company, records);
+  const row = result.alternativeRows.find((candidate) => candidate.part === "0704-070M0VD");
+  assert.equal(row?.status, "matched");
+  assert.deepEqual(row?.customerPartNumbers, ["1062138-00-C"]);
+  assert.match(row?.customerAssociationEvidence[0] ?? "", /1062138-00-C → TOSHIBA\/SSM3K318R_LXGF/);
+  assert.equal(result.rows[0].status, "mpn-unmatched");
+});
+
 test("detects TPN as the customer BOM part number header", () => {
   assert.deepEqual(
     detectCustomerColumns(["Level", "TPN", "MfgPNos", "ReferenceDesignator"]),
@@ -1374,6 +1459,11 @@ test("exports customer mapping statuses and MVA details to Excel and HTML", asyn
   const dataHeaders = workbook.getWorksheet("差異資料").getRow(5).values;
   assert.ok(dataHeaders.includes("新版 BOM R欄 TPN"));
   assert.ok(dataHeaders.includes("新版客戶 BOM TPN 驗證"));
+  const englishWorkbook = buildBomReport(diffs, "before.xlsx", "after.xlsx", context, "en");
+  assert.ok(englishWorkbook.getWorksheet("Customer TPN Mapping"));
+  assert.ok(englishWorkbook.getWorksheet("MVA Details"));
+  assert.equal(englishWorkbook.getWorksheet("Customer TPN Mapping").getCell("I2").value, "BOM S-column Association");
+  assert.equal(englishWorkbook.getWorksheet("MVA Details").getCell("A3").value, "Version");
   const html = buildBomHtmlReport(diffs, "before.xlsx", "after.xlsx", context);
   assert.match(html, /客戶 BOM TPN 對應/);
   assert.match(html, /BOM S欄關聯/);

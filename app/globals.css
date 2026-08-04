@@ -58,6 +58,9 @@ button { cursor: pointer; }
 .topbar h1 { font-size: 19px; margin: 0; letter-spacing: -.25px; }
 .version-pill { display: inline-block; max-width: min(58vw, 560px); margin-left: 9px; padding: 4px 8px; border-radius: 5px; background: #eef3ff; color: #3a68bf; font-family: var(--font-geist-mono); font-size: 11px; font-weight: 650; vertical-align: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .top-actions { display: flex; align-items: center; gap: 9px; }
+.export-language-label { display: flex; align-items: center; gap: 7px; color: #667085; font-size: 11px; font-weight: 650; }
+.export-language { height: 35px; min-width: 94px; padding: 0 27px 0 10px; border: 1px solid #d8dde6; border-radius: 7px; background: #fff; color: #344054; font-size: 12px; font-weight: 700; cursor: pointer; }
+.export-language:focus-visible { outline: 2px solid #90b4ff; outline-offset: 1px; }
 .saved { display: flex; align-items: center; gap: 5px; color: #749080; font-size: 11px; margin-right: 7px; }
 .saved.offline { color: #178760; }
 .top-actions button { height: 35px; padding: 0 13px; border-radius: 7px; display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 700; }
@@ -274,12 +277,10 @@ tbody tr:nth-last-child(-n+2) .confidence-popover:hover .confidence-tooltip, tbo
 .part-entry small.customer-part.tpn-association-invalid { color: #966117; background: #fff8e8; font-weight: 800; }
 .part-entry small.customer-part.location-unmatched { color: #9a651b; font-weight: 800; }
 .part-entry small.customer-part.not-imported { color: #9aa2af; }
-.part-absence { min-height: 52px; padding: 8px 9px; display: flex; align-items: center; gap: 9px; border: 1px solid; border-radius: 7px; }
-.part-absence > span { width: 28px; height: 28px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 6px; }
+.part-absence { min-height: 52px; padding: 8px 9px; display: flex; align-items: center; gap: 9px; border: 1px dashed #cfd6df; border-radius: 7px; background: #f7f8fa; color: #667085; }
+.part-absence > span { width: 28px; height: 28px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 6px; background: #e9edf2; color: #7b8796; }
 .part-absence > div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.part-absence strong { font-size: 10px; }.part-absence small { font-size: 9px; line-height: 1.35; }
-.part-absence.not-existed { border-color: #c8e7d9; background: #f1faf6; color: #197454; }.part-absence.not-existed > span { background: #dff3e9; }
-.part-absence.removed { border-color: #efcece; background: #fff5f5; color: #a84848; }.part-absence.removed > span { background: #f8dfdf; }
+.part-absence strong { color: #596579; font-size: 10px; }.part-absence small { color: #8993a2; font-size: 9px; line-height: 1.35; }
 .position-list { display: flex; align-items: flex-start; gap: 4px; flex-wrap: wrap; }
 .position-list > small { width: 100%; color: #7d8797; font-size: 9px; }
 .position-chip { padding: 4px 6px; border: 0; border-radius: 4px; font-family: var(--font-geist-mono); font-size: 10px; font-weight: 700; cursor: zoom-in; }

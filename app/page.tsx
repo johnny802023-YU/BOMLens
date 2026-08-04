@@ -34,6 +34,7 @@ import { clearInactivePdfCache, PdfSchematicViewer, type PdfScrollSync, type Pdf
 import {
   canonicalPartNumber,
   bomStructureLabel,
+  bomStructureKindLabel,
   bomDiffDisplayFields,
   compareBom,
   analyzeCompanyBomMatrix,
@@ -74,7 +75,7 @@ import {
   type PlacementRecord,
 } from "./supplemental-logic";
 
-type FieldFilter = "新增料號" | "新增替料" | "新增插件位置" | "刪除料號" | "刪除替料" | "移除插件位置" | "更換料號" | "製程別放置異常";
+type FieldFilter = "新增料號" | "新增替料" | "新增插件位置" | "刪除料號" | "刪除替料" | "移除插件位置" | "更換料號" | "架構變更" | "製程別放置異常";
 type ImpactFilter = "all" | "purchase" | "deleted" | "review";
 type DiffGroupKey = "added" | "removed" | "changed" | "review";
 type CustomerMappingRowStatus = CustomerMappingResult["alternativeRows"][number]["status"];
@@ -117,6 +118,7 @@ const fieldFilterOptions: Array<{ key: FieldFilter; label: string }> = [
   { key: "刪除替料", label: "刪除替料" },
   { key: "移除插件位置", label: "移除插件位置" },
   { key: "更換料號", label: "更換料號" },
+  { key: "架構變更", label: "架構變更" },
   { key: "製程別放置異常", label: "SMT／DIP 放置異常" },
 ];
 
@@ -133,8 +135,8 @@ const primaryTypeLabels: Record<DiffPrimaryType, string> = {
 const diffGroupMeta: Array<{ key: DiffGroupKey; label: string; description: string }> = [
   { key: "added", label: "新增料號／替料", description: "只存在新版，需要確認採購與插件位置" },
   { key: "removed", label: "刪除料號／替料", description: "新版已移除，需要確認停用與庫存影響" },
-  { key: "changed", label: "變更", description: "插件位置、數量或同位置換料；另偵測 SMT／DIP 製程別異動" },
-  { key: "review", label: "待人工確認", description: "配對不明確或料號跨 SMT／DIP 架構，需要人工判斷" },
+  { key: "changed", label: "變更", description: "插件位置、數量、同位置換料或所屬架構異動" },
+  { key: "review", label: "待人工確認", description: "配對不明確或料號跨 60／VB-T／VB-D／PCB 架構，需要人工判斷" },
 ];
 
 function bomItem(ref: string, alternatives: Array<[string, string, string?]>, positions: string[], description = ""): BomItem {
@@ -252,6 +254,7 @@ export default function Home() {
   const [collapsedGroups, setCollapsedGroups] = useState<DiffGroupKey[]>([]);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [mvaOpen, setMvaOpen] = useState(false);
+  const [exportLanguage, setExportLanguage] = useState<"zh-TW" | "en">("zh-TW");
   const beforeInput = useRef<HTMLInputElement>(null);
   const afterInput = useRef<HTMLInputElement>(null);
   const customerBeforeInput = useRef<HTMLInputElement>(null);
@@ -498,9 +501,9 @@ export default function Home() {
   async function exportCsv() {
     try {
       const { exportBomReport } = await import("./export-report");
-      await exportBomReport(visible, beforeName, afterName, { before: beforeAudit, after: afterAudit, originalBefore, originalAfter, customerBefore: customerBeforeResult, customerAfter: customerAfterResult, mvaBefore, mvaAfter });
+      await exportBomReport(visible, beforeName, afterName, { before: beforeAudit, after: afterAudit, originalBefore, originalAfter, customerBefore: customerBeforeResult, customerAfter: customerAfterResult, mvaBefore, mvaAfter }, exportLanguage);
     } catch {
-      window.alert("報表產生失敗，請重新整理後再試一次。");
+      window.alert(exportLanguage === "en" ? "Report generation failed. Refresh the page and try again." : "報表產生失敗，請重新整理後再試一次。");
     }
   }
 
@@ -524,7 +527,17 @@ export default function Home() {
         <header className="topbar">
           <button className="mobile-menu" onClick={() => setMobileNav(true)} aria-label="開啟選單"><Menu /></button>
           <div><div className="breadcrumb">本機工具 <span>/</span> BOM 版本比對</div><h1>版本比對 <span className="version-pill">{beforeName || "舊版"} → {afterName || "新版"}</span></h1></div>
-          <div className="top-actions"><span className="saved offline"><ShieldCheck size={14} /> 本機離線</span><button className="primary" onClick={exportCsv} title="依目前搜尋與篩選結果匯出"><Download size={17} /> 匯出差異</button></div>
+          <div className="top-actions">
+            <span className="saved offline"><ShieldCheck size={14} /> 本機離線</span>
+            <label className="export-language-label">
+              <span>報表語言</span>
+              <select className="export-language" aria-label="匯出報表語言" value={exportLanguage} onChange={(event) => setExportLanguage(event.target.value as "zh-TW" | "en")}>
+                <option value="zh-TW">中文版</option>
+                <option value="en">English</option>
+              </select>
+            </label>
+            <button className="primary" onClick={exportCsv} title={`依目前搜尋與篩選結果匯出${exportLanguage === "en" ? "英文版" : "中文版"}`}><Download size={17} /> 匯出差異</button>
+          </div>
         </header>
 
         <div className="content">
@@ -829,7 +842,8 @@ function DiffDetailDrawer({ item, onClose, onLocate }: { item: BomDiff; onClose:
           <div><small>新版數量</small><strong>{item.after?.qty ?? 0}</strong></div>
         </div>
         <section className="detail-section"><h3>所屬架構</h3><p className="structure-value">{structure}</p></section>
-        {item.processChange && <section className="detail-section review-reason"><h3><AlertTriangle size={15} /> 製程別放置異常</h3><p>此料號由 {item.processChange.before} 架構移至 {item.processChange.after} 架構，請確認 RD 是否將料件放錯群組。</p></section>}
+        {item.structureChange && <section className="detail-section review-reason"><h3><AlertTriangle size={15} /> 架構變更</h3><p>此料號的所屬分支已由 {bomStructureKindLabel(item.structureChange.before)} 移至 {bomStructureKindLabel(item.structureChange.after)}，請確認 RD 是否為有意調整。</p></section>}
+        {item.processChange && <section className="detail-section review-reason"><h3><AlertTriangle size={15} /> 製程別放置異常</h3><p>此料號由 {item.processChange.before} 製程移至 {item.processChange.after} 製程，請確認 RD 是否將料件放錯群組。</p></section>}
         <section className="detail-section"><h3>料號與製造廠商</h3>
           <div className="detail-version-grid">
             <article><span>舊版</span><PartList item={item.before} changedParts={item.removedParts} tone="removed" /></article>
@@ -851,19 +865,23 @@ function ReviewGuidance({ item }: { item: BomDiff }) {
   const overlapCount = (item.after?.positions ?? []).filter((position) => beforePositions.has(position.trim().toUpperCase())).length;
   const beforeRows = item.before?.sourceRows?.join("、") || "未提供";
   const afterRows = item.after?.sourceRows?.join("、") || "未提供";
-  const reviewType = item.processChange
-    ? "SMT／DIP 架構移動"
+  const reviewType = item.structureChange
+    ? "所屬架構移動"
+    : item.processChange
+    ? "SMT／DIP 製程移動"
     : item.matchReason.includes("多個候選")
       ? "存在多個接近候選"
       : "配對證據不足";
-  const risk = item.processChange
+  const risk = item.structureChange
+    ? "可能是 RD 將料件放入錯誤架構分支，也可能是有意的架構調整。"
+    : item.processChange
     ? "可能是 RD 將料件放入錯誤製程分支，也可能是有意的製程調整。"
     : "若配錯群組，新增、刪除、替料與數量差異都可能被歸到錯誤料組。";
   const checklist = [
     `核對舊版第 ${beforeRows} 列與新版第 ${afterRows} 列是否為同一功能料組。`,
     `確認所屬架構與插件位置；目前新舊版共有 ${overlapCount} 個相同位置。`,
     "逐一確認主料、替料及製造廠商料號，不能只依項次名稱判斷。",
-    item.processChange ? "確認由 SMT 移至 DIP（或反向移動）是否為 RD 有意修改。" : "若不是同一料組，應視為各自的新增／刪除，不要接受目前配對。",
+    item.structureChange ? "確認 60／VB-T／VB-D／PCB 分支變更是否為 RD 有意修改。" : item.processChange ? "確認由 SMT 移至 DIP（或反向移動）是否為 RD 有意修改。" : "若不是同一料組，應視為各自的新增／刪除，不要接受目前配對。",
   ];
   return <section className="detail-section review-reason review-guidance">
     <h3><AlertTriangle size={15} /> 待人工確認</h3>
@@ -981,7 +999,7 @@ function PrimaryTypeBadge({ item }: { item: BomDiff }) {
 
 function ChangeFields({ fields, tone }: { fields: string[]; tone: string }) {
   return <div className={`change-list ${tone}`}>{fields.map((field) =>
-    <span className={field.startsWith("製程別放置異常") ? "change-pill process-warning" : "change-pill"} key={field}>{field}</span>,
+    <span className={field.startsWith("製程別放置異常") || field.startsWith("架構變更") ? "change-pill process-warning" : "change-pill"} key={field}>{field}</span>,
   )}</div>;
 }
 

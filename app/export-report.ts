@@ -4,6 +4,7 @@ import type { CustomerMappingResult, MvaSummary } from "./supplemental-logic.ts"
 
 export type ReportSource = { fileName: string; sheetName: string; importedAt: string; audit: ImportAudit };
 export type OriginalBomSource = { fileName: string; sheetName: string; data: ArrayBuffer; matrix: unknown[][] };
+export type ReportLanguage = "zh-TW" | "en";
 export type ReportContext = {
   before?: ReportSource | null;
   after?: ReportSource | null;
@@ -49,39 +50,92 @@ const dataTableNames: Record<ExportSection, string> = {
   製程別放置異常: "BomDiffProcess",
   僅插件位置差異: "BomDiffPositions",
 };
-const detailHeaders = [
-  "主要異動", "差異項目", "料號異動", "插件位置差異",
-  "舊版主件料號", "舊版製造廠商料號", "舊版製造廠商", "舊版 BOM R欄 TPN", "舊版客戶 BOM TPN 驗證",
-  "新版主件料號", "新版製造廠商料號", "新版製造廠商", "新版 BOM R欄 TPN", "新版客戶 BOM TPN 驗證",
-  "舊版數量", "新版數量", "數量變化",
-] as const;
-const dataHeaders = ["分類", ...detailHeaders] as const;
-const summaryColumnGroups = [
-  { label: "主要異動", start: 1, end: 2 },
-  { label: "差異項目", start: 3, end: 4 },
-  { label: "料號異動", start: 5, end: 6 },
-  { label: "插件位置差異", start: 7, end: 8 },
-  { label: "舊版料號資訊", start: 9, end: 12, tone: "old" },
-  { label: "→", start: 13, end: 13 },
-  { label: "新版料號資訊", start: 14, end: 17, tone: "new" },
-  { label: "數量", start: 18, end: 19 },
-] as const;
-const summarySubHeaders = [
-  { label: "新增／刪除／變更", start: 1, end: 2 },
-  { label: "差異標籤", start: 3, end: 4 },
-  { label: "料號新增／刪除", start: 5, end: 6 },
-  { label: "插件位置", start: 7, end: 8 },
-  { label: "舊版料號", start: 9, end: 9, tone: "old" },
-  { label: "舊版製造商料號", start: 10, end: 10, tone: "old" },
-  { label: "舊版製造商", start: 11, end: 11, tone: "old" },
-  { label: "舊版 BOM R欄 TPN", start: 12, end: 12, tone: "old" },
-  { label: "→", start: 13, end: 13 },
-  { label: "新版料號", start: 14, end: 14, tone: "new" },
-  { label: "新版製造商料號", start: 15, end: 15, tone: "new" },
-  { label: "新版製造商", start: 16, end: 16, tone: "new" },
-  { label: "新版 BOM R欄 TPN", start: 17, end: 17, tone: "new" },
-  { label: "舊版 → 新版", start: 18, end: 19 },
-] as const;
+const reportTexts = {
+  "zh-TW": {
+    sheets: { summary: "差異摘要", data: "差異資料", customer: "客戶 BOM TPN 對應", unmatched: "客戶 BOM 未對應列", mva: "MVA 明細", originalBefore: "舊版原始 BOM", originalAfter: "新版原始 BOM" },
+    title: "BOM 差異比較報告", dataTitle: "BOM 差異資料｜依分類分表", workbookTitle: "BOM 差異清單",
+    before: "舊版", after: "新版", beforeBom: "舊版 BOM", afterBom: "新版 BOM",
+    legend: "顏色說明｜淡紅：舊版刪除／停用料號　淡綠：新版新增／改用料號　灰／藍：料號未異動",
+    emptyCategory: "此分類無差異", noDifferences: "新舊版本沒有可匯出的差異",
+    summaryNote: "閱讀版｜完整獨立欄位與分類表格請至「差異資料」工作表",
+    noPartChange: "料號無增減", unavailable: "未提供料號", unmapped: "未對應", blank: "空白",
+    added: "新增", removed: "刪除", changed: "變更", replacement: "換料",
+    filename: "BOM_diff_report_ZH",
+  },
+  en: {
+    sheets: { summary: "Difference Summary", data: "Difference Data", customer: "Customer TPN Mapping", unmatched: "Unmapped Customer BOM", mva: "MVA Details", originalBefore: "Original BOM - Old", originalAfter: "Original BOM - New" },
+    title: "BOM Difference Comparison Report", dataTitle: "BOM Difference Data | Grouped by Category", workbookTitle: "BOM Difference List",
+    before: "Old Version", after: "New Version", beforeBom: "Old BOM", afterBom: "New BOM",
+    legend: "Color legend | Light red: removed or retired in the old BOM   Light green: added or adopted in the new BOM   Gray/blue: unchanged part number",
+    emptyCategory: "No differences in this category", noDifferences: "No exportable differences between the old and new BOMs",
+    summaryNote: "Readable summary | See the Difference Data worksheet for separate columns and category tables",
+    noPartChange: "No part number change", unavailable: "Part number unavailable", unmapped: "Unmapped", blank: "Blank",
+    added: "Added", removed: "Removed", changed: "Changed", replacement: "Replacement",
+    filename: "BOM_diff_report_EN",
+  },
+} as const;
+
+function text(language: ReportLanguage) { return reportTexts[language]; }
+
+const sectionLabels: Record<ReportLanguage, Record<ExportSection, string>> = {
+  "zh-TW": {
+    新版完全新料: "新版完全新料", 新增替代: "新增替代", 新版完全移除: "新版完全移除", 刪除替代: "刪除替代",
+    數量差異: "數量差異", "TPN 差異": "TPN 差異", 製程別放置異常: "架構／製程變更", 僅插件位置差異: "僅插件位置差異",
+  },
+  en: {
+    新版完全新料: "Completely New Parts",
+    新增替代: "Added Substitutes",
+    新版完全移除: "Completely Removed Parts",
+    刪除替代: "Removed Substitutes",
+    數量差異: "Quantity Differences",
+    "TPN 差異": "TPN Differences",
+    製程別放置異常: "Structure / Process Changes",
+    僅插件位置差異: "Location-only Differences",
+  },
+};
+
+function detailHeaders(language: ReportLanguage) {
+  return language === "en" ? [
+    "Primary Change", "Difference Items", "Part Number Change", "Location Difference",
+    "Old Company Part Number", "Old Manufacturer Part Number", "Old Manufacturer", "Old BOM R-column TPN", "Old Customer BOM TPN Validation",
+    "New Company Part Number", "New Manufacturer Part Number", "New Manufacturer", "New BOM R-column TPN", "New Customer BOM TPN Validation",
+    "Old Quantity", "New Quantity", "Quantity Trend",
+  ] : [
+    "主要異動", "差異項目", "料號異動", "插件位置差異",
+    "舊版主件料號", "舊版製造廠商料號", "舊版製造廠商", "舊版 BOM R欄 TPN", "舊版客戶 BOM TPN 驗證",
+    "新版主件料號", "新版製造廠商料號", "新版製造廠商", "新版 BOM R欄 TPN", "新版客戶 BOM TPN 驗證",
+    "舊版數量", "新版數量", "數量變化",
+  ];
+}
+
+function dataHeaders(language: ReportLanguage) { return [language === "en" ? "Category" : "分類", ...detailHeaders(language)]; }
+
+function summaryColumnGroups(language: ReportLanguage) {
+  const labels = language === "en"
+    ? ["Primary Change", "Difference Items", "Part Number Change", "Location Difference", "Old Part Information", "→", "New Part Information", "Quantity"]
+    : ["主要異動", "差異項目", "料號異動", "插件位置差異", "舊版料號資訊", "→", "新版料號資訊", "數量"];
+  return [
+    { label: labels[0], start: 1, end: 2 }, { label: labels[1], start: 3, end: 4 },
+    { label: labels[2], start: 5, end: 6 }, { label: labels[3], start: 7, end: 8 },
+    { label: labels[4], start: 9, end: 12, tone: "old" as const }, { label: labels[5], start: 13, end: 13 },
+    { label: labels[6], start: 14, end: 17, tone: "new" as const }, { label: labels[7], start: 18, end: 19 },
+  ];
+}
+
+function summarySubHeaders(language: ReportLanguage) {
+  const labels = language === "en"
+    ? ["Added / Removed / Changed", "Difference Tags", "Added / Removed Part", "Location", "Old Part Number", "Old Manufacturer Part Number", "Old Manufacturer", "Old BOM R-column TPN", "→", "New Part Number", "New Manufacturer Part Number", "New Manufacturer", "New BOM R-column TPN", "Old → New"]
+    : ["新增／刪除／變更", "差異標籤", "料號新增／刪除", "插件位置", "舊版料號", "舊版製造商料號", "舊版製造商", "舊版 BOM R欄 TPN", "→", "新版料號", "新版製造商料號", "新版製造商", "新版 BOM R欄 TPN", "舊版 → 新版"];
+  return [
+    { label: labels[0], start: 1, end: 2 }, { label: labels[1], start: 3, end: 4 },
+    { label: labels[2], start: 5, end: 6 }, { label: labels[3], start: 7, end: 8 },
+    { label: labels[4], start: 9, end: 9, tone: "old" as const }, { label: labels[5], start: 10, end: 10, tone: "old" as const },
+    { label: labels[6], start: 11, end: 11, tone: "old" as const }, { label: labels[7], start: 12, end: 12, tone: "old" as const },
+    { label: labels[8], start: 13, end: 13 }, { label: labels[9], start: 14, end: 14, tone: "new" as const },
+    { label: labels[10], start: 15, end: 15, tone: "new" as const }, { label: labels[11], start: 16, end: 16, tone: "new" as const },
+    { label: labels[12], start: 17, end: 17, tone: "new" as const }, { label: labels[13], start: 18, end: 19 },
+  ];
+}
 const summaryColumnFit = [
   { min: 10, max: 12 }, { min: 10, max: 12 }, { min: 12, max: 18 }, { min: 12, max: 18 },
   { min: 14, max: 28 }, { min: 14, max: 28 }, { min: 12, max: 24 }, { min: 12, max: 24 },
@@ -97,8 +151,8 @@ const dataColumnFit = [
   { min: 10, max: 12 }, { min: 12, max: 14 },
 ] as const;
 
-function partLabel(part: BomAlternative) {
-  return part.part || part.manufacturerPart || "未提供料號";
+function partLabel(part: BomAlternative, language: ReportLanguage = "zh-TW") {
+  return part.part || part.manufacturerPart || text(language).unavailable;
 }
 
 function partIdentity(part: BomAlternative) {
@@ -111,8 +165,8 @@ function includesPart(parts: BomAlternative[], candidate?: BomAlternative) {
   return Boolean(identity) && parts.some((part) => partIdentity(part) === identity);
 }
 
-function listPartNumbers(parts: BomAlternative[]) {
-  return parts.map(partLabel).join("\n");
+function listPartNumbers(parts: BomAlternative[], language: ReportLanguage = "zh-TW") {
+  return parts.map((part) => partLabel(part, language)).join("\n");
 }
 
 function listManufacturerParts(parts: BomAlternative[]) {
@@ -123,8 +177,19 @@ function listManufacturers(parts: BomAlternative[]) {
   return parts.map((part) => part.manufacturerName).filter(Boolean).join("\n");
 }
 
-function customerStatusLabel(item: BomDiff["before"] | BomDiff["after"]) {
+function customerStatusLabel(item: BomDiff["before"] | BomDiff["after"], language: ReportLanguage = "zh-TW") {
   const mappedTpns = [...new Set(item?.customerPartNumbers ?? (item?.customerPartNumber ? [item.customerPartNumber] : []))];
+  if (language === "en") {
+    if (item?.customerMappingStatus === "matched") return mappedTpns.length ? `Customer BOM TPN ${mappedTpns.join(", ")} | Matched` : "Customer BOM TPN validation is missing a TPN";
+    return {
+      "rd-maintenance-missing": `Customer BOM TPN ${mappedTpns.join(", ") || "—"} | BOM R column is blank; RD maintenance required`,
+      "rd-maintenance-mismatch": `Customer BOM TPN ${mappedTpns.join(", ") || "—"} | BOM R column mismatch; RD maintenance required`,
+      "tpn-association-mismatch": `Customer BOM TPN ${mappedTpns.join(", ") || "—"} | BOM S-column MPN association mismatch`,
+      "tpn-association-invalid": `Customer BOM TPN ${mappedTpns.join(", ") || "—"} | BOM R/S data requires review`,
+      "location-unmatched": "Location not matched", "mpn-unmatched": "MPN not matched", "missing-mpn": "Insufficient MPN data",
+      "tpn-missing": "Customer TPN is blank", ambiguous: "Multiple candidates", "not-imported": "Not imported",
+    }[item?.customerMappingStatus ?? "not-imported"];
+  }
   if (item?.customerMappingStatus === "matched") return mappedTpns.length ? `客戶 BOM TPN ${mappedTpns.join("、")}・一致` : "客戶 BOM TPN 驗證結果缺少 TPN";
   return {
     "rd-maintenance-missing": `客戶 BOM TPN ${mappedTpns.join("、") || "—"}・R欄空白，請 RD 維護`,
@@ -144,17 +209,30 @@ function customerPartValue(item: BomDiff["before"] | BomDiff["after"]) {
   return [...new Set(item?.rdCustomerPartNumbers ?? item?.alternatives.flatMap((alternative) => alternative.rdCustomerPartNumbers ?? []) ?? [])].join("\n");
 }
 
-function summaryPartTpnValue(part: BomAlternative | undefined, customerBomMapped: boolean) {
+function summaryPartTpnValue(part: BomAlternative | undefined, customerBomMapped: boolean, language: ReportLanguage = "zh-TW") {
   if (!part) return "";
   const values = customerBomMapped ? part.customerPartNumbers ?? [] : part.rdCustomerPartNumbers ?? [];
   const uniqueValues = [...new Set(values.map((value) => value.trim().toUpperCase()).filter(Boolean))];
-  return uniqueValues.join("\n") || (customerBomMapped ? "未對應" : "空白");
+  return uniqueValues.join("\n") || (customerBomMapped ? text(language).unmapped : text(language).blank);
 }
 
-function primaryLabel(diff: BomDiff) {
-  if (diff.primaryType === "componentAdded" || diff.primaryType === "substituteAdded") return "新增";
-  if (diff.primaryType === "componentRemoved" || diff.primaryType === "substituteRemoved") return "刪除";
-  return "變更";
+function primaryLabel(diff: BomDiff, language: ReportLanguage = "zh-TW") {
+  if (diff.primaryType === "componentAdded" || diff.primaryType === "substituteAdded") return text(language).added;
+  if (diff.primaryType === "componentRemoved" || diff.primaryType === "substituteRemoved") return text(language).removed;
+  return text(language).changed;
+}
+
+function translateDiffField(field: string, language: ReportLanguage) {
+  if (language === "zh-TW") return field;
+  const exact: Record<string, string> = {
+    新增料號: "Added Part Number", 刪除料號: "Removed Part Number", 新增替料: "Added Substitute",
+    刪除替料: "Removed Substitute", 新增插件位置: "Added Location", 移除插件位置: "Removed Location",
+    更換料號: "Part Number Replacement", 數量差異: "Quantity Difference", 客戶料號差異: "TPN Difference",
+  };
+  if (exact[field]) return exact[field];
+  if (field.startsWith("架構變更")) return field.replace("架構變更", "Structure Change");
+  if (field.startsWith("製程別放置異常")) return field.replace("製程別放置異常", "Process Placement Issue");
+  return field;
 }
 
 export function exportCategories(diff: BomDiff): ExportCategory[] {
@@ -167,7 +245,7 @@ export function exportCategories(diff: BomDiff): ExportCategory[] {
   }
   if (diff.primaryType === "substituteAdded") categories.push("新增替代");
   if (diff.primaryType === "substituteRemoved") categories.push("刪除替代");
-  if (diff.processChange) categories.push("製程別放置異常");
+  if (diff.structureChange || diff.processChange) categories.push("製程別放置異常");
   if (diff.before && diff.after && diff.before.qty !== diff.after.qty) categories.push("數量差異");
   if (diff.fields.includes("客戶料號差異")) categories.push("TPN 差異");
   return categories;
@@ -178,28 +256,28 @@ function belongsToSection(diff: BomDiff, section: ExportSection) {
   return section === "僅插件位置差異" ? categories.length === 0 : categories.includes(section);
 }
 
-function partChanges(diff: BomDiff) {
+function partChanges(diff: BomDiff, language: ReportLanguage = "zh-TW") {
   return [
-    ...diff.addedParts.map((part) => `＋ ${partLabel(part)}`),
-    ...diff.removedParts.map((part) => `－ ${partLabel(part)}`),
+    ...diff.addedParts.map((part) => `＋ ${partLabel(part, language)}`),
+    ...diff.removedParts.map((part) => `－ ${partLabel(part, language)}`),
   ].join("\n");
 }
 
-function partChangesForSection(diff: BomDiff, section: ExportSection) {
+function partChangesForSection(diff: BomDiff, section: ExportSection, language: ReportLanguage = "zh-TW") {
   if (section === "新版完全新料" || section === "新增替代") {
-    return diff.addedParts.map((part) => `＋ ${partLabel(part)}`).join("\n");
+    return diff.addedParts.map((part) => `＋ ${partLabel(part, language)}`).join("\n");
   }
   if (section === "新版完全移除" || section === "刪除替代") {
-    return diff.removedParts.map((part) => `－ ${partLabel(part)}`).join("\n");
+    return diff.removedParts.map((part) => `－ ${partLabel(part, language)}`).join("\n");
   }
-  return partChanges(diff);
+  return partChanges(diff, language);
 }
 
-function positionChanges(diff: BomDiff) {
+function positionChanges(diff: BomDiff, language: ReportLanguage = "zh-TW") {
   return [
     ...diff.addedPositions.map((position) => `＋ ${position}`),
     ...diff.removedPositions.map((position) => `－ ${position}`),
-    ...diff.replacementPositions.map((position) => `${position} 換料`),
+    ...diff.replacementPositions.map((position) => `${position} ${text(language).replacement}`),
   ].join("\n");
 }
 
@@ -323,26 +401,26 @@ function sectionTone(section: ExportSection) {
   return { foreground: colors.blue, background: colors.paleBlue };
 }
 
-function styleSummarySectionTitle(sheet: ExcelJS.Worksheet, rowNumber: number, section: ExportSection, count: number) {
+function styleSummarySectionTitle(sheet: ExcelJS.Worksheet, rowNumber: number, section: ExportSection, count: number, language: ReportLanguage) {
   sheet.mergeCells(rowNumber, 1, rowNumber, 19);
   const row = sheet.getRow(rowNumber);
   row.height = 24;
   const cell = row.getCell(1);
   const tone = sectionTone(section);
-  cell.value = `${section}（${count}）`;
+  cell.value = `${sectionLabels[language][section]}（${count}）`;
   cell.font = { name: "Microsoft JhengHei", size: 11, bold: true, color: { argb: tone.foreground } };
   cell.fill = fill(tone.background);
   cell.alignment = { vertical: "middle", horizontal: "left" };
   cell.border = border();
 }
 
-function styleDataSectionTitle(sheet: ExcelJS.Worksheet, rowNumber: number, section: ExportSection, count: number) {
+function styleDataSectionTitle(sheet: ExcelJS.Worksheet, rowNumber: number, section: ExportSection, count: number, language: ReportLanguage) {
   sheet.mergeCells(rowNumber, 1, rowNumber, 18);
   const row = sheet.getRow(rowNumber);
   row.height = 26;
   const cell = row.getCell(1);
   const tone = sectionTone(section);
-  cell.value = `${section}（${count}）`;
+  cell.value = `${sectionLabels[language][section]}（${count}）`;
   cell.font = { name: "Microsoft JhengHei", size: 12, bold: true, color: { argb: tone.foreground } };
   cell.fill = fill(tone.background);
   cell.alignment = { vertical: "middle", horizontal: "left" };
@@ -352,16 +430,16 @@ function styleDataSectionTitle(sheet: ExcelJS.Worksheet, rowNumber: number, sect
   };
 }
 
-function detailRowValues(diff: BomDiff, section: ExportSection): ExcelJS.CellValue[] {
+function detailRowValues(diff: BomDiff, section: ExportSection, language: ReportLanguage): ExcelJS.CellValue[] {
   const beforeParts = diff.before?.alternatives ?? [];
   const afterParts = diff.after?.alternatives ?? [];
   const beforeQty = diff.before?.qty ?? 0;
   const afterQty = diff.after?.qty ?? 0;
   const quantityTrend = afterQty > beforeQty ? "Increase" : afterQty < beforeQty ? "Decrease" : "Same";
   return [
-    primaryLabel(diff), bomDiffDisplayFields(diff).join("\n"), partChangesForSection(diff, section), positionChanges(diff),
-    listPartNumbers(beforeParts), listManufacturerParts(beforeParts), listManufacturers(beforeParts), customerPartValue(diff.before), customerStatusLabel(diff.before),
-    listPartNumbers(afterParts), listManufacturerParts(afterParts), listManufacturers(afterParts), customerPartValue(diff.after), customerStatusLabel(diff.after),
+    primaryLabel(diff, language), bomDiffDisplayFields(diff).map((field) => translateDiffField(field, language)).join("\n"), partChangesForSection(diff, section, language), positionChanges(diff, language),
+    listPartNumbers(beforeParts, language), listManufacturerParts(beforeParts), listManufacturers(beforeParts), customerPartValue(diff.before), customerStatusLabel(diff.before, language),
+    listPartNumbers(afterParts, language), listManufacturerParts(afterParts), listManufacturers(afterParts), customerPartValue(diff.after), customerStatusLabel(diff.after, language),
     beforeQty, afterQty, quantityTrend,
   ];
 }
@@ -384,10 +462,11 @@ function styleDataRow(row: ExcelJS.Row, diff: BomDiff, striped: boolean, section
   categoryCell.font = { name: "Microsoft JhengHei", size: 10, bold: true, color: { argb: categoryTone.foreground } };
   categoryCell.fill = fill(categoryTone.background);
   const typeCell = row.getCell(2);
-  const label = primaryLabel(diff);
-  const tone = label === "新增"
+  const isAdded = diff.primaryType === "componentAdded" || diff.primaryType === "substituteAdded";
+  const isRemoved = diff.primaryType === "componentRemoved" || diff.primaryType === "substituteRemoved";
+  const tone = isAdded
     ? { font: colors.green, fill: colors.paleGreen }
-    : label === "刪除"
+    : isRemoved
       ? { font: colors.red, fill: colors.paleRed }
       : { font: colors.blue, fill: colors.paleBlue };
   typeCell.font = { name: "Microsoft JhengHei", size: 10, bold: true, color: { argb: tone.font } };
@@ -448,6 +527,7 @@ function writeSummaryDiffRows(
   section: ExportSection,
   striped: boolean,
   customerBomMapped: { before: boolean; after: boolean },
+  language: ReportLanguage,
 ) {
   const beforeParts = diff.before?.alternatives ?? [];
   const afterParts = diff.after?.alternatives ?? [];
@@ -475,10 +555,10 @@ function writeSummaryDiffRows(
   ].forEach((group) => sheet.mergeCells(startRow, group.start, endRow, group.end));
 
   const row = sheet.getRow(startRow);
-  row.getCell(1).value = primaryLabel(diff);
-  row.getCell(3).value = bomDiffDisplayFields(diff).join("\n") || primaryLabel(diff);
-  row.getCell(5).value = partChanges(diff) || "料號無增減";
-  row.getCell(7).value = positionChanges(diff) || "—";
+  row.getCell(1).value = primaryLabel(diff, language);
+  row.getCell(3).value = bomDiffDisplayFields(diff).map((field) => translateDiffField(field, language)).join("\n") || primaryLabel(diff, language);
+  row.getCell(5).value = partChanges(diff, language) || text(language).noPartChange;
+  row.getCell(7).value = positionChanges(diff, language) || "—";
   row.getCell(13).value = "→";
   const beforeQty = diff.before?.qty ?? 0;
   const afterQty = diff.after?.qty ?? 0;
@@ -488,14 +568,14 @@ function writeSummaryDiffRows(
     const partRow = sheet.getRow(startRow + index);
     const beforePart = beforeParts[index];
     const afterPart = afterParts[index];
-    partRow.getCell(9).value = beforePart ? partLabel(beforePart) : index === 0 ? "—" : "";
+    partRow.getCell(9).value = beforePart ? partLabel(beforePart, language) : index === 0 ? "—" : "";
     partRow.getCell(10).value = beforePart?.manufacturerPart ?? "";
     partRow.getCell(11).value = beforePart?.manufacturerName ?? "";
-    partRow.getCell(12).value = summaryPartTpnValue(beforePart, customerBomMapped.before);
-    partRow.getCell(14).value = afterPart ? partLabel(afterPart) : index === 0 ? "—" : "";
+    partRow.getCell(12).value = summaryPartTpnValue(beforePart, customerBomMapped.before, language);
+    partRow.getCell(14).value = afterPart ? partLabel(afterPart, language) : index === 0 ? "—" : "";
     partRow.getCell(15).value = afterPart?.manufacturerPart ?? "";
     partRow.getCell(16).value = afterPart?.manufacturerName ?? "";
-    partRow.getCell(17).value = summaryPartTpnValue(afterPart, customerBomMapped.after);
+    partRow.getCell(17).value = summaryPartTpnValue(afterPart, customerBomMapped.after, language);
     [9, 10, 11, 12].forEach((column) => { partRow.getCell(column).fill = fill(colors.paleOldVersion); });
     [14, 15, 16, 17].forEach((column) => { partRow.getCell(column).fill = fill(colors.paleNewVersion); });
     partRow.getCell(9).font = { name: "Microsoft JhengHei", size: 10, bold: index === 0, color: { argb: "344054" } };
@@ -614,29 +694,58 @@ async function appendOriginalBom(targetWorkbook: ExcelJS.Workbook, source: Origi
   return copyMatrix(source.matrix, targetWorkbook, targetName);
 }
 
-function appendCustomerMappingSheet(workbook: ExcelJS.Workbook, before?: CustomerMappingResult | null, after?: CustomerMappingResult | null) {
+function mappingReason(reason: string, language: ReportLanguage, status?: string) {
+  if (language === "zh-TW") return reason;
+  const byStatus: Record<string, string> = {
+    matched: "Location, MPN, and TPN association matched exactly.",
+    "rd-maintenance-missing": "Location and MPN matched, but the BOM R column is blank. RD maintenance is required.",
+    "rd-maintenance-mismatch": "Location and MPN matched, but the BOM R-column TPN is inconsistent. RD maintenance is required.",
+    "tpn-association-mismatch": "The BOM S-column MPN association does not match the customer BOM record.",
+    "tpn-association-invalid": "The BOM R/S-column association is incomplete or invalid and requires review.",
+    "location-unmatched": "No company BOM group has the exact same Location set.",
+    "mpn-unmatched": "Location matched, but no company primary or substitute MPN matched exactly.",
+    "missing-mpn": "The customer or company MPN data is incomplete.",
+    "tpn-missing": "The customer BOM TPN is blank and cannot be mapped.",
+    ambiguous: "Multiple mapping candidates remain and require review.",
+    "not-imported": "Customer BOM data was not imported.",
+  };
+  if (status && byStatus[status]) return byStatus[status];
+  return reason
+    .replaceAll("配對成功", "Matched")
+    .replaceAll("請 RD 維護", "RD maintenance required")
+    .replaceAll("未匹配", "not matched")
+    .replaceAll("未對應", "unmapped")
+    .replaceAll("多重候選", "multiple candidates")
+    .replaceAll("資料不足", "insufficient data")
+    .replaceAll("原始列", "source row");
+}
+
+function appendCustomerMappingSheet(workbook: ExcelJS.Workbook, before: CustomerMappingResult | null | undefined, after: CustomerMappingResult | null | undefined, language: ReportLanguage) {
   if (!before && !after) return;
-  const sheet = workbook.addWorksheet("客戶 BOM TPN 對應", { properties: { defaultRowHeight: 28 } });
-  const headers = ["版本", "配對狀態", "角色", "公司料號", "公司製造廠商料號", "Location", "客戶 BOM TPN", "BOM R欄 TPN", "BOM S欄關聯", "說明"];
-  styleTitle(sheet, "A1:J1", "客戶 BOM TPN－公司主料／替料逐顆對應結果");
+  const t = text(language);
+  const sheet = workbook.addWorksheet(t.sheets.customer, { properties: { defaultRowHeight: 28 } });
+  const headers = language === "en"
+    ? ["Version", "Mapping Status", "Role", "Company Part Number", "Company Manufacturer Part Number", "Location", "Customer BOM TPN", "BOM R-column TPN", "BOM S-column Association", "Notes"]
+    : ["版本", "配對狀態", "角色", "公司料號", "公司製造廠商料號", "Location", "客戶 BOM TPN", "BOM R欄 TPN", "BOM S欄關聯", "說明"];
+  styleTitle(sheet, "A1:J1", language === "en" ? "Customer BOM TPN Mapping by Company Primary and Substitute Part" : "客戶 BOM TPN－公司主料／替料逐顆對應結果");
   sheet.getRow(2).values = headers;
   styleHeader(sheet.getRow(2));
-  const entries = ([["舊版", before], ["新版", after]] as const).flatMap(([version, result]) =>
+  const entries = ([[t.before, before], [t.after, after]] as const).flatMap(([version, result]) =>
     (result?.alternativeRows ?? []).map((row) => ({ version, row })),
   );
   entries.forEach(({ version, row }, index) => {
     const target = sheet.getRow(index + 3);
     target.values = [
       version,
-      row.status === "matched" ? "配對成功" : customerStatusLabel({ customerMappingStatus: row.status } as BomDiff["before"]),
-      row.role,
+      row.status === "matched" ? (language === "en" ? "Matched" : "配對成功") : customerStatusLabel({ customerMappingStatus: row.status } as BomDiff["before"], language),
+      language === "en" ? (row.role === "主料" ? "Primary" : row.role === "替料" ? "Substitute" : row.role) : row.role,
       row.part,
       row.manufacturerPart,
       row.positions.join("\n"),
       row.customerPartNumbers.join("\n"),
       row.rdCustomerPartNumbers.join("\n"),
       row.customerAssociationEvidence.join("\n"),
-      row.reason,
+      mappingReason(row.reason, language, row.status),
     ];
     target.height = 36;
     target.eachCell({ includeEmpty: true }, (cell) => {
@@ -670,19 +779,21 @@ function appendCustomerMappingSheet(workbook: ExcelJS.Workbook, before?: Custome
   sheet.views = [{ state: "frozen", ySplit: 2, showGridLines: false }];
   sheet.autoFilter = { from: "A2", to: `J${Math.max(2, entries.length + 2)}` };
 
-  const unmatchedEntries = ([["舊版", before], ["新版", after]] as const).flatMap(([version, result]) =>
+  const unmatchedEntries = ([[t.before, before], [t.after, after]] as const).flatMap(([version, result]) =>
     (result?.rows ?? [])
       .filter((row) => ["location-unmatched", "mpn-unmatched", "missing-mpn", "tpn-missing", "ambiguous"].includes(row.status))
       .map((row) => ({ version, row })),
   );
   if (!unmatchedEntries.length) return;
-  const unmatched = workbook.addWorksheet("客戶 BOM 未對應列", { properties: { defaultRowHeight: 28 } });
-  styleTitle(unmatched, "A1:H1", "客戶 BOM 未完整對應資料");
-  unmatched.getRow(2).values = ["版本", "狀態", "客戶 BOM TPN", "Location", "客戶製造廠商料號", "已命中公司料號", "說明", "客戶 BOM 原始列"];
+  const unmatched = workbook.addWorksheet(t.sheets.unmatched, { properties: { defaultRowHeight: 28 } });
+  styleTitle(unmatched, "A1:H1", language === "en" ? "Customer BOM Records Not Fully Mapped" : "客戶 BOM 未完整對應資料");
+  unmatched.getRow(2).values = language === "en"
+    ? ["Version", "Status", "Customer BOM TPN", "Location", "Customer Manufacturer Part Number", "Matched Company Part Number", "Notes", "Customer BOM Source Row"]
+    : ["版本", "狀態", "客戶 BOM TPN", "Location", "客戶製造廠商料號", "已命中公司料號", "說明", "客戶 BOM 原始列"];
   styleHeader(unmatched.getRow(2));
   unmatchedEntries.forEach(({ version, row }, index) => {
     const target = unmatched.getRow(index + 3);
-    target.values = [version, customerStatusLabel({ customerMappingStatus: row.status } as BomDiff["before"]), row.record.customerPartNumber, row.record.positions.join("\n"), row.record.manufacturerParts.join("\n"), row.companyPartNumbers.join("\n"), row.reason, row.record.sourceRow];
+    target.values = [version, customerStatusLabel({ customerMappingStatus: row.status } as BomDiff["before"], language), row.record.customerPartNumber, row.record.positions.join("\n"), row.record.manufacturerParts.join("\n"), row.companyPartNumbers.join("\n"), mappingReason(row.reason, language, row.status), row.record.sourceRow];
     target.height = 38;
     target.eachCell({ includeEmpty: true }, (cell) => {
       cell.font = { name: "Microsoft JhengHei", size: 10, color: { argb: "344054" } };
@@ -699,29 +810,36 @@ function appendCustomerMappingSheet(workbook: ExcelJS.Workbook, before?: Custome
   unmatched.autoFilter = { from: "A2", to: `H${unmatchedEntries.length + 2}` };
 }
 
-function appendMvaSheet(workbook: ExcelJS.Workbook, before?: MvaSummary | null, after?: MvaSummary | null) {
+function appendMvaSheet(workbook: ExcelJS.Workbook, before: MvaSummary | null | undefined, after: MvaSummary | null | undefined, language: ReportLanguage) {
   if (!before && !after) return;
-  const sheet = workbook.addWorksheet("MVA 明細", { properties: { defaultRowHeight: 26 } });
-  styleTitle(sheet, "A1:G1", "MVA 製程顆數與未計入明細");
-  sheet.getRow(3).values = ["版本", "SMT Top", "SMT Bottom", "DIP Top", "DIP Bottom", "計入合計", "未計入"];
+  const t = text(language);
+  const sheet = workbook.addWorksheet(t.sheets.mva, { properties: { defaultRowHeight: 26 } });
+  styleTitle(sheet, "A1:G1", language === "en" ? "MVA Process Counts and Excluded Records" : "MVA 製程顆數與未計入明細");
+  sheet.getRow(3).values = language === "en" ? ["Version", "SMT Top", "SMT Bottom", "DIP Top", "DIP Bottom", "Included Total", "Excluded"] : ["版本", "SMT Top", "SMT Bottom", "DIP Top", "DIP Bottom", "計入合計", "未計入"];
   styleHeader(sheet.getRow(3));
-  ([["舊版", before], ["新版", after]] as const).forEach(([version, result], index) => {
+  ([[t.before, before], [t.after, after]] as const).forEach(([version, result], index) => {
     const row = sheet.getRow(index + 4);
     row.values = [version, result?.smtTop ?? "", result?.smtBottom ?? "", result?.dipTop ?? "", result?.dipBottom ?? "", result?.included.length ?? "", result?.excluded.length ?? ""];
     row.eachCell({ includeEmpty: true }, (cell) => { cell.border = border(); cell.alignment = { vertical: "middle", horizontal: "center" }; });
   });
-  sheet.getRow(7).values = ["版本", "狀態", "Designator", "板面", "製程", "公司料號／架構", "未計入原因"];
+  sheet.getRow(7).values = language === "en" ? ["Version", "Status", "Designator", "Board Side", "Process", "Company Part / Structure", "Exclusion Reason"] : ["版本", "狀態", "Designator", "板面", "製程", "公司料號／架構", "未計入原因"];
   styleHeader(sheet.getRow(7));
   let rowNumber = 8;
-  ([["舊版", before], ["新版", after]] as const).forEach(([version, result]) => {
+  ([[t.before, before], [t.after, after]] as const).forEach(([version, result]) => {
     result?.included.forEach((record) => {
       const row = sheet.getRow(rowNumber++);
-      row.values = [version, "已計入", record.designator, record.side, record.process, `${record.part}${record.structure ? `\n${record.structure}` : ""}`, ""];
+      row.values = [version, language === "en" ? "Included" : "已計入", record.designator, record.side, record.process, `${record.part}${record.structure ? `\n${record.structure}` : ""}`, ""];
       row.getCell(2).font = { name: "Microsoft JhengHei", bold: true, color: { argb: colors.green } };
     });
     result?.excluded.forEach((record) => {
       const row = sheet.getRow(rowNumber++);
-      row.values = [version, "未計入", record.designator, record.rawLayer, "", "", `${record.reason}（原始列 ${record.sourceRows.join("、")}）`];
+      const reason = language === "en" ? ({
+        "同一插件位置出現衝突的 Top／Bottom": "Conflicting Top/Bottom values for the same designator",
+        "Layer 無法辨識": "Layer cannot be identified",
+        "同時命中多個可判定製程的 BOM 料群": "The designator matches multiple BOM groups with identifiable processes",
+        "BOM 找不到可判定 SMT／DIP 的插件位置": "No BOM designator with an identifiable SMT/DIP process was found",
+      }[record.reason] ?? "Excluded from the MVA count") : record.reason;
+      row.values = [version, language === "en" ? "Excluded" : "未計入", record.designator, record.rawLayer, "", "", language === "en" ? `${reason} (source rows ${record.sourceRows.join(", ")})` : `${reason}（原始列 ${record.sourceRows.join("、")}）`];
       [2, 7].forEach((column) => { row.getCell(column).fill = fill(colors.paleAmber); row.getCell(column).font = { name: "Microsoft JhengHei", bold: true, color: { argb: colors.amber } }; });
     });
   });
@@ -736,24 +854,25 @@ function appendMvaSheet(workbook: ExcelJS.Workbook, before?: MvaSummary | null, 
   sheet.views = [{ state: "frozen", ySplit: 7, showGridLines: false }];
 }
 
-export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: string, context: ReportContext = {}) {
+export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: string, context: ReportContext = {}, language: ReportLanguage = "zh-TW") {
+  const t = text(language);
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "BOMLens Offline";
   workbook.created = new Date();
   workbook.modified = new Date();
-  workbook.title = "BOM 差異清單";
+  workbook.title = t.workbookTitle;
   workbook.subject = `${beforeName} → ${afterName}`;
 
-  const summarySheet = workbook.addWorksheet("差異摘要", { properties: { defaultRowHeight: 26 } });
-  styleTitle(summarySheet, "A1:S1", "BOM 差異比較報告");
+  const summarySheet = workbook.addWorksheet(t.sheets.summary, { properties: { defaultRowHeight: 26 } });
+  styleTitle(summarySheet, "A1:S1", t.title);
   summarySheet.getRow(1).height = 36;
   summarySheet.mergeCells("A2:B2");
   summarySheet.mergeCells("C2:H2");
   summarySheet.mergeCells("I2:J2");
   summarySheet.mergeCells("K2:S2");
-  summarySheet.getCell("A2").value = "舊版 BOM";
+  summarySheet.getCell("A2").value = t.beforeBom;
   summarySheet.getCell("C2").value = beforeName;
-  summarySheet.getCell("I2").value = "新版 BOM";
+  summarySheet.getCell("I2").value = t.afterBom;
   summarySheet.getCell("K2").value = afterName;
   ["A2", "I2"].forEach((address) => {
     summarySheet.getCell(address).font = { name: "Microsoft JhengHei", bold: true, color: { argb: colors.gray } };
@@ -768,19 +887,19 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
     summarySheet.mergeCells(range);
     const cell = summarySheet.getCell(range.split(":")[0]);
     const tone = sectionTone(section);
-    cell.value = `${section}\n${sectionDiffs.length}`;
+    cell.value = `${sectionLabels[language][section]}\n${sectionDiffs.length}`;
     cell.font = { name: "Microsoft JhengHei", size: 11, bold: true, color: { argb: tone.foreground } };
     cell.fill = fill(tone.background);
     cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
     cell.border = border();
   });
   summarySheet.mergeCells("A6:S6");
-  summarySheet.getCell("A6").value = "顏色說明｜淡紅：舊版刪除／停用料號　淡綠：新版新增／改用料號　灰／藍：料號未異動";
+  summarySheet.getCell("A6").value = t.legend;
   summarySheet.getCell("A6").font = { name: "Microsoft JhengHei", size: 9, color: { argb: colors.gray } };
   summarySheet.getCell("A6").alignment = { horizontal: "right", vertical: "middle" };
 
-  styleSummaryHeaderRow(summarySheet, 7, summaryColumnGroups, colors.navy);
-  styleSummaryHeaderRow(summarySheet, 8, summarySubHeaders, colors.blue);
+  styleSummaryHeaderRow(summarySheet, 7, summaryColumnGroups(language), colors.navy);
+  styleSummaryHeaderRow(summarySheet, 8, summarySubHeaders(language), colors.blue);
   const summaryCustomerBomMapped = {
     before: Boolean(context.customerBefore),
     after: Boolean(context.customerAfter),
@@ -789,18 +908,18 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
   const summaryDetailRows: number[] = [];
   exportSectionOrder.forEach((section) => {
     const sectionDiffs = diffs.filter((diff) => belongsToSection(diff, section));
-    styleSummarySectionTitle(summarySheet, summaryRow, section, sectionDiffs.length);
+    styleSummarySectionTitle(summarySheet, summaryRow, section, sectionDiffs.length, language);
     summaryRow += 1;
     if (sectionDiffs.length) {
       sectionDiffs.forEach((diff, index) => {
         const firstDetailRow = summaryRow;
-        summaryRow = writeSummaryDiffRows(summarySheet, summaryRow, diff, section, index % 2 === 1, summaryCustomerBomMapped);
+        summaryRow = writeSummaryDiffRows(summarySheet, summaryRow, diff, section, index % 2 === 1, summaryCustomerBomMapped, language);
         for (let rowNumber = firstDetailRow; rowNumber < summaryRow; rowNumber += 1) summaryDetailRows.push(rowNumber);
       });
     } else {
       summarySheet.mergeCells(summaryRow, 1, summaryRow, 19);
       const emptyCell = summarySheet.getRow(summaryRow).getCell(1);
-      emptyCell.value = "此分類無差異";
+      emptyCell.value = t.emptyCategory;
       emptyCell.font = { name: "Microsoft JhengHei", size: 10, italic: true, color: { argb: colors.gray } };
       emptyCell.alignment = { horizontal: "center", vertical: "middle" };
       emptyCell.fill = fill(colors.paleGray);
@@ -810,7 +929,7 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
     }
   });
   summarySheet.mergeCells(summaryRow + 1, 1, summaryRow + 1, 19);
-  summarySheet.getCell(summaryRow + 1, 1).value = "閱讀版｜完整獨立欄位與分類表格請至「差異資料」工作表";
+  summarySheet.getCell(summaryRow + 1, 1).value = t.summaryNote;
   summarySheet.getCell(summaryRow + 1, 1).font = { name: "Microsoft JhengHei", size: 9, italic: true, color: { argb: colors.gray } };
   summarySheet.getCell(summaryRow + 1, 1).alignment = { horizontal: "right", vertical: "middle" };
   fitColumns(summarySheet, summaryColumnFit);
@@ -824,18 +943,18 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
     margins: { left: 0.25, right: 0.25, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 },
   };
 
-  const dataSheet = workbook.addWorksheet("差異資料", { properties: { defaultRowHeight: 28 } });
-  styleTitle(dataSheet, "A1:R1", "BOM 差異資料｜依分類分表");
+  const dataSheet = workbook.addWorksheet(t.sheets.data, { properties: { defaultRowHeight: 28 } });
+  styleTitle(dataSheet, "A1:R1", t.dataTitle);
   dataSheet.getRow(1).height = 34;
-  dataSheet.getCell("A2").value = "舊版 BOM";
+  dataSheet.getCell("A2").value = t.beforeBom;
   dataSheet.getCell("B2").value = beforeName;
-  dataSheet.getCell("D2").value = "新版 BOM";
+  dataSheet.getCell("D2").value = t.afterBom;
   dataSheet.getCell("E2").value = afterName;
   ["A2", "D2"].forEach((address) => {
     dataSheet.getCell(address).font = { name: "Microsoft JhengHei", bold: true, color: { argb: colors.gray } };
   });
   dataSheet.mergeCells("A3:R3");
-  dataSheet.getCell("A3").value = "顏色說明｜淡紅：舊版刪除／停用料號　淡綠：新版新增／改用料號　灰／藍：料號未異動";
+  dataSheet.getCell("A3").value = t.legend;
   dataSheet.getCell("A3").font = { name: "Microsoft JhengHei", size: 9, color: { argb: colors.gray } };
   dataSheet.getCell("A3").alignment = { horizontal: "right", vertical: "middle" };
   let dataRow = 4;
@@ -845,7 +964,7 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
     const sectionDiffs = diffs.filter((diff) => belongsToSection(diff, section));
     if (!sectionDiffs.length) return;
     hasDataSection = true;
-    styleDataSectionTitle(dataSheet, dataRow, section, sectionDiffs.length);
+    styleDataSectionTitle(dataSheet, dataRow, section, sectionDiffs.length, language);
     const headerRow = dataRow + 1;
     const firstDataRow = headerRow + 1;
     dataSheet.addTable({
@@ -854,8 +973,8 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
       headerRow: true,
       totalsRow: false,
       style: { theme: "TableStyleMedium2", showRowStripes: true },
-      columns: dataHeaders.map((name) => ({ name, filterButton: true })),
-      rows: sectionDiffs.map((diff) => [section, ...detailRowValues(diff, section)]),
+      columns: dataHeaders(language).map((name) => ({ name, filterButton: true })),
+      rows: sectionDiffs.map((diff) => [sectionLabels[language][section], ...detailRowValues(diff, section, language)]),
     });
     styleHeader(dataSheet.getRow(headerRow));
     [6, 7, 8, 9, 10, 16].forEach((column) => { dataSheet.getRow(headerRow).getCell(column).fill = fill(colors.oldVersion); });
@@ -870,7 +989,7 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
   if (!hasDataSection) {
     dataSheet.mergeCells("A4:R4");
     const emptyCell = dataSheet.getCell("A4");
-    emptyCell.value = "新舊版本沒有可匯出的差異";
+    emptyCell.value = t.noDifferences;
     emptyCell.font = { name: "Microsoft JhengHei", size: 11, italic: true, color: { argb: colors.gray } };
     emptyCell.fill = fill(colors.paleGray);
     emptyCell.alignment = { horizontal: "center", vertical: "middle" };
@@ -887,30 +1006,31 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
     margins: { left: 0.25, right: 0.25, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 },
   };
 
-  appendCustomerMappingSheet(workbook, context.customerBefore, context.customerAfter);
-  appendMvaSheet(workbook, context.mvaBefore, context.mvaAfter);
+  appendCustomerMappingSheet(workbook, context.customerBefore, context.customerAfter, language);
+  appendMvaSheet(workbook, context.mvaBefore, context.mvaAfter, language);
 
   return workbook;
 }
 
-export async function buildBomReportWithOriginals(diffs: BomDiff[], beforeName: string, afterName: string, context: ReportContext = {}) {
-  const workbook = buildBomReport(diffs, beforeName, afterName, context);
+export async function buildBomReportWithOriginals(diffs: BomDiff[], beforeName: string, afterName: string, context: ReportContext = {}, language: ReportLanguage = "zh-TW") {
+  const t = text(language);
+  const workbook = buildBomReport(diffs, beforeName, afterName, context, language);
   if (context.originalBefore) {
-    await appendOriginalBom(workbook, context.originalBefore, "舊版原始 BOM");
-    workbook.getWorksheet("差異摘要")!.getCell("C2").value = { text: beforeName, hyperlink: "#'舊版原始 BOM'!A1" };
-    workbook.getWorksheet("差異資料")!.getCell("B2").value = { text: beforeName, hyperlink: "#'舊版原始 BOM'!A1" };
+    await appendOriginalBom(workbook, context.originalBefore, t.sheets.originalBefore);
+    workbook.getWorksheet(t.sheets.summary)!.getCell("C2").value = { text: beforeName, hyperlink: `#'${t.sheets.originalBefore}'!A1` };
+    workbook.getWorksheet(t.sheets.data)!.getCell("B2").value = { text: beforeName, hyperlink: `#'${t.sheets.originalBefore}'!A1` };
   }
   if (context.originalAfter) {
-    await appendOriginalBom(workbook, context.originalAfter, "新版原始 BOM");
-    workbook.getWorksheet("差異摘要")!.getCell("K2").value = { text: afterName, hyperlink: "#'新版原始 BOM'!A1" };
-    workbook.getWorksheet("差異資料")!.getCell("E2").value = { text: afterName, hyperlink: "#'新版原始 BOM'!A1" };
+    await appendOriginalBom(workbook, context.originalAfter, t.sheets.originalAfter);
+    workbook.getWorksheet(t.sheets.summary)!.getCell("K2").value = { text: afterName, hyperlink: `#'${t.sheets.originalAfter}'!A1` };
+    workbook.getWorksheet(t.sheets.data)!.getCell("E2").value = { text: afterName, hyperlink: `#'${t.sheets.originalAfter}'!A1` };
   }
   return workbook;
 }
 
-export async function exportBomReport(diffs: BomDiff[], beforeName: string, afterName: string, context: ReportContext = {}) {
-  const workbook = await buildBomReportWithOriginals(diffs, beforeName, afterName, context);
+export async function exportBomReport(diffs: BomDiff[], beforeName: string, afterName: string, context: ReportContext = {}, language: ReportLanguage = "zh-TW") {
+  const workbook = await buildBomReportWithOriginals(diffs, beforeName, afterName, context, language);
   const buffer = await workbook.xlsx.writeBuffer();
   const stamp = new Date().toISOString().slice(0, 10).replaceAll("-", "");
-  saveBuffer(buffer, `BOM_diff_report_${stamp}.xlsx`);
+  saveBuffer(buffer, `${text(language).filename}_${stamp}.xlsx`);
 }
