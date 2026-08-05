@@ -571,7 +571,10 @@ export function analyzeCompanyBomMatrix(matrix: unknown[][], headerIndex: number
   if (isCompleteCompanyMapping(mapping)) {
     const rawParts = new Map<string, Set<string>>();
     const rowScopes = new Map<number, string>();
-    items.forEach((item) => item.sourceRows?.forEach((row) => rowScopes.set(row, item.structureKey?.split(":").slice(0, 2).join(":") ?? "flat")));
+    // The same canonical 12-character part may intentionally appear in
+    // multiple continuous groups/locations with different customer TPNs.
+    // Only treat raw variants as a collision inside the same parsed group.
+    items.forEach((item, index) => item.sourceRows?.forEach((row) => rowScopes.set(row, item.structureKey ?? `flat:${index}`)));
     matrix.slice(headerIndex + 1).forEach((row, offset) => {
       const rowNumber = headerIndex + offset + 2;
       const rawPart = text(row[mapping.part]).replace(/\s+/g, "");

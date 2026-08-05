@@ -897,7 +897,8 @@ test("reports quantity mismatches, duplicate positions, and 12-character collisi
   const matrix = [
     ["項次", "料號", "數量", "插件位置"],
     ["001", "PREFIX-A-123456789012", "2", "U1"],
-    ["002", "PREFIX-B-123456789012", "1", "U1"],
+    ["", "PREFIX-B-123456789012", "2", ""],
+    ["002", "UNIQUE-PART", "1", "U1"],
   ];
   const result = analyzeCompanyBomMatrix(matrix, 0);
   const codes = result.audit.issues.map((issue) => issue.code);
@@ -905,7 +906,24 @@ test("reports quantity mismatches, duplicate positions, and 12-character collisi
   assert.ok(codes.includes("duplicate-position"));
   assert.ok(codes.includes("part-collision"));
   assert.equal(result.audit.mappingLabels.part, "料號");
-  assert.deepEqual(result.items[0].sourceRows, [2]);
+  assert.deepEqual(result.items[0].sourceRows, [2, 3]);
+});
+
+test("accepts the same canonical part in separate location groups for different customer TPN classifications", () => {
+  const matrix = [
+    ["項次", "主件料號", "組成用量", "插件位置", "製造廠商料號", "對應客戶料號"],
+    ["0PA", "| |---1A30-04F40ZY", "8.0/1", "C34,C36,C56,C57,C134,C135,C138,C173", "CL10B105KO8VPNC", "TPN-A"],
+    ["0PK", "| |---1A30-04U90ZY", "1.0/1", "C10", "EMK107B7105KAHT", "TPN-B"],
+    ["", "| | |S-1A30-04F40ZY", "1.0/1", "", "CL10B105KO8VPNC", "TPN-B"],
+  ];
+
+  const result = analyzeCompanyBomMatrix(matrix, 0);
+  assert.equal(result.items.length, 2);
+  assert.deepEqual(result.items.map((item) => item.positions), [
+    ["C34", "C36", "C56", "C57", "C134", "C135", "C138", "C173"],
+    ["C10"],
+  ]);
+  assert.equal(result.audit.issues.some((issue) => issue.code === "part-collision"), false);
 });
 
 test("ignores main/substitute ordering but reports added parts and placements", () => {
