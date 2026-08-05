@@ -1,5 +1,5 @@
 import ExcelJS from "exceljs";
-import { bomDiffDisplayFields, type BomAlternative, type BomDiff, type ImportAudit } from "./bom-logic.ts";
+import { bomDiffDisplayFields, bomQuantityChanged, type BomAlternative, type BomDiff, type ImportAudit } from "./bom-logic.ts";
 import type { CustomerMappingResult, MvaSummary } from "./supplemental-logic.ts";
 
 export type ReportSource = { fileName: string; sheetName: string; importedAt: string; audit: ImportAudit };
@@ -246,7 +246,7 @@ export function exportCategories(diff: BomDiff): ExportCategory[] {
   if (diff.primaryType === "substituteAdded") categories.push("新增替代");
   if (diff.primaryType === "substituteRemoved") categories.push("刪除替代");
   if (diff.structureChange || diff.processChange) categories.push("製程別放置異常");
-  if (diff.before && diff.after && diff.before.qty !== diff.after.qty) categories.push("數量差異");
+  if (diff.before && diff.after && bomQuantityChanged(diff.before, diff.after)) categories.push("數量差異");
   if (diff.fields.includes("客戶料號差異")) categories.push("TPN 差異");
   return categories;
 }
@@ -489,8 +489,8 @@ function styleDataRow(row: ExcelJS.Row, diff: BomDiff, striped: boolean, section
       row.getCell(column).font = { name: "Microsoft JhengHei", size: 10, bold: true, color: { argb: colors.red } };
     }
   });
-  row.getCell(16).numFmt = "#,##0";
-  row.getCell(17).numFmt = "#,##0";
+  row.getCell(16).numFmt = "#,##0.##########";
+  row.getCell(17).numFmt = "#,##0.##########";
   const trendCell = row.getCell(18);
   trendCell.font = {
     name: "Microsoft JhengHei",

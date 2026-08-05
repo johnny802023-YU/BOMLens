@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { analyzeCompanyBomMatrix, bomDiffDisplayFields, bomProcessKind, canonicalPartNumber, compareBom, detectCompanyColumns, findCompanyHeader, parseCompanyBomMatrix, parseQuantity, sortBomDiffsForAll } from "../app/bom-logic.ts";
+import { analyzeCompanyBomMatrix, bomDiffDisplayFields, bomProcessKind, bomQuantityChanged, canonicalPartNumber, compareBom, detectCompanyColumns, findCompanyHeader, parseCompanyBomMatrix, parseQuantity, sortBomDiffsForAll } from "../app/bom-logic.ts";
 import { buildPageReferenceIndex, centeredPdfHitScroll, centeredRenderedHitScroll, findReferenceHits, lookupReferenceHits, normalizeReference } from "../app/pdf-search.ts";
 import { calculateMva, detectCustomerColumns, detectPlacementColumns, mapCustomerBom, parseCustomerBomMatrix, parsePlacementMatrix } from "../app/supplemental-logic.ts";
 import { createSchematicReportPlan } from "../app/schematic-report-logic.ts";
@@ -519,6 +519,8 @@ test("maps company columns by header name and groups substitute parts", () => {
 
   assert.equal(findCompanyHeader(matrix), 0);
   assert.equal(parseQuantity("4.0/1"), 4);
+  assert.equal(parseQuantity("197.0/100000"), 0.00197);
+  assert.equal(parseQuantity("1.97/1000"), 0.00197);
   assert.equal(canonicalPartNumber("PREFIX-123456789012"), "123456789012");
   const parsed = parseCompanyBomMatrix(matrix);
   assert.equal(parsed.length, 1);
@@ -529,6 +531,46 @@ test("maps company columns by header name and groups substitute parts", () => {
   assert.deepEqual(parsed[0].alternatives.map((part) => part.manufacturerName), ["Texas Instruments", "Nexperia"]);
   assert.deepEqual(parsed[0].alternatives.map((part) => part.rdCustomerPartNumbers), [["CUSTOMER-OLD"], ["CUSTOMER-NEW"]]);
   assert.deepEqual(parsed[0].rdCustomerPartNumbers, ["CUSTOMER-OLD", "CUSTOMER-NEW"]);
+});
+
+test("normalizes 1G usage quantities by their denominator instead of counting material labels as placements", async () => {
+  const header = ["項次", "主件料號", "組成用量", "插件位置", "製造廠商料號"];
+  const before = parseCompanyBomMatrix([
+    header,
+    ["05M", "1G03-002B000", "197.0/100000", "SOLDERPASTE", "INDIUM10.8HF"],
+  ]);
+  const equivalentAfter = parseCompanyBomMatrix([
+    header,
+    ["05M", "1G03-002B000", "1.97/1000", "SOLDERPASTE", "INDIUM10.8HF"],
+  ]);
+  const changedAfter = parseCompanyBomMatrix([
+    header,
+    ["05M", "1G03-002B000", "250.0/100000", "SOLDERPASTE", "INDIUM10.8HF"],
+  ]);
+
+  assert.equal(before[0].qty, 0.00197);
+  assert.equal(before[0].declaredQty, 0.00197);
+  assert.equal(compareBom(before, equivalentAfter)[0].kind, "same");
+  assert.equal(bomQuantityChanged(before[0], equivalentAfter[0]), false);
+  assert.equal(bomQuantityChanged(before[0], changedAfter[0]), true);
+  const changedDiff = compareBom(before, changedAfter)[0];
+  assert.ok(changedDiff.categories.includes("changed"));
+
+  const { buildBomReport, exportCategories } = await import("../app/export-report.ts");
+  assert.deepEqual(exportCategories(changedDiff), ["數量差異"]);
+  const report = buildBomReport([changedDiff], "before.xlsx", "after.xlsx");
+  const dataSheet = report.getWorksheet("差異資料");
+  const sectionRow = dataSheet.getColumn(1).values.findIndex((value) => value === "數量差異（1）");
+  assert.equal(dataSheet.getCell(`P${sectionRow + 2}`).value, 0.00197);
+  assert.equal(dataSheet.getCell(`Q${sectionRow + 2}`).value, 0.0025);
+  assert.equal(dataSheet.getCell(`P${sectionRow + 2}`).numFmt, "#,##0.##########");
+  assert.equal(dataSheet.getCell(`Q${sectionRow + 2}`).numFmt, "#,##0.##########");
+
+  const audit = analyzeCompanyBomMatrix([
+    header,
+    ["05M", "1G03-002B000", "197.0/100000", "SOLDERPASTE", "INDIUM10.8HF"],
+  ], 0);
+  assert.equal(audit.audit.issues.some((issue) => issue.code === "quantity-mismatch"), false);
 });
 
 test("defaults to the numbered company BOM headers", () => {

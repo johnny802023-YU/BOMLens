@@ -242,9 +242,32 @@ function pick(row: Record<string, unknown>, names: string[]) {
 }
 
 export function parseQuantity(value: unknown) {
-  const first = text(value).split("/")[0].replace(/,/g, "");
-  const quantity = Number.parseFloat(first);
-  return Number.isFinite(quantity) ? quantity : 0;
+  const [rawNumerator, rawDenominator] = text(value).split("/");
+  const numerator = Number.parseFloat((rawNumerator ?? "").replace(/,/g, ""));
+  if (!Number.isFinite(numerator)) return 0;
+
+  const denominator = Number.parseFloat((rawDenominator ?? "").replace(/,/g, ""));
+  if (!Number.isFinite(denominator) || denominator <= 0) return numerator;
+  return numerator / denominator;
+}
+
+function isScaledUsagePart(part: string) {
+  return /^1G/i.test(canonicalPartNumber(part));
+}
+
+export function usesScaledQuantity(item: Pick<BomItem, "part" | "alternatives">) {
+  return isScaledUsagePart(item.part) || item.alternatives.some((alternative) => isScaledUsagePart(alternative.part));
+}
+
+export function quantitiesEqual(left: number, right: number) {
+  const scale = Math.max(1, Math.abs(left), Math.abs(right));
+  return Math.abs(left - right) <= Number.EPSILON * scale * 16;
+}
+
+export function bomQuantityChanged(before: BomItem, after: BomItem) {
+  if (!quantitiesEqual(before.qty, after.qty)) return true;
+  if (usesScaledQuantity(before) || usesScaledQuantity(after)) return false;
+  return before.positions.length !== after.positions.length;
 }
 
 export function parsePositions(value: unknown) {
@@ -493,7 +516,9 @@ export function parseCompanyBomMatrix(matrix: unknown[][], headerIndex = findCom
       manufacturerName: first.manufacturerName,
       value: first.spec,
       description: first.description,
-      qty: positions.length || group.rawQuantity,
+      qty: usesScaledQuantity({ part: first.part, alternatives: group.alternatives })
+        ? group.rawQuantity
+        : positions.length || group.rawQuantity,
       positions,
       alternatives: group.alternatives,
       sourceRows: group.sourceRows,
@@ -564,7 +589,7 @@ export function analyzeCompanyBomMatrix(matrix: unknown[][], headerIndex: number
     });
     items.forEach((item) => {
       if (!item.alternatives.some((part) => part.part)) issues.push({ severity: "warning", code: "missing-part", message: `項次 ${item.ref} 沒有料號。`, rows: item.sourceRows });
-      if (item.positions.length && item.declaredQty && item.positions.length !== item.declaredQty) {
+      if (!usesScaledQuantity(item) && item.positions.length && item.declaredQty && !quantitiesEqual(item.positions.length, item.declaredQty)) {
         const structure = bomStructureLabel(item);
         issues.push({ severity: "warning", code: "quantity-mismatch", message: `${structure ? `${structure}／` : ""}項次 ${item.ref} 的數量為 ${item.declaredQty}，但插件位置共有 ${item.positions.length} 個。`, rows: item.sourceRows });
       }
@@ -595,7 +620,11 @@ export function rowsToBom(rows: Record<string, unknown>[]): BomItem[] {
       const value = pick(row, aliases.value);
       const description = pick(row, aliases.description);
       const positions = parsePositions(pick(row, aliases.positions));
-      const qty = positions.length || parseQuantity(pick(row, aliases.qty)) || 1;
+      const rawQuantity = parseQuantity(pick(row, aliases.qty));
+      const alternatives = part || manufacturerPart ? [{ part, manufacturerPart, manufacturerName, description, spec: value }] : [];
+      const qty = usesScaledQuantity({ part, alternatives })
+        ? rawQuantity || 1
+        : positions.length || rawQuantity || 1;
       return {
         ref,
         part,
@@ -605,7 +634,7 @@ export function rowsToBom(rows: Record<string, unknown>[]): BomItem[] {
         description,
         qty,
         positions,
-        alternatives: part || manufacturerPart ? [{ part, manufacturerPart, manufacturerName, description, spec: value }] : [],
+        alternatives,
       };
     })
     .filter((row) => row.alternatives.length || row.positions.length || !row.ref.startsWith("ROW-"));
@@ -666,7 +695,7 @@ export function compareBom(before: BomItem[], after: BomItem[]): BomDiff[] {
     }
 
     let fields = compactFields(addedParts, removedParts, addedPositions, removedPositions, true, true);
-    const quantityChanged = a.qty !== b.qty;
+    const quantityChanged = bomQuantityChanged(a, b);
     const customerPartNumbersChanged = !overlapStats(
       a.rdCustomerPartNumbers ?? a.alternatives.flatMap((alternative) => alternative.rdCustomerPartNumbers ?? []),
       b.rdCustomerPartNumbers ?? b.alternatives.flatMap((alternative) => alternative.rdCustomerPartNumbers ?? []),

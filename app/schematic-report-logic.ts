@@ -1,4 +1,4 @@
-import type { BomDiff } from "./bom-logic.ts";
+import { bomQuantityChanged, type BomDiff } from "./bom-logic.ts";
 import { normalizeReference } from "./pdf-search.ts";
 
 export type SchematicReportPlanEntry = {
@@ -28,7 +28,7 @@ function entryLabels(diff: BomDiff, reference: string) {
   if (diff.replacementPositions.some((position) => normalizeReference(position) === reference)) labels.push("更換料號");
   if (diff.addedParts.length) labels.push(diff.primaryType === "substituteAdded" ? "新增替料" : "新增料號");
   if (diff.removedParts.length) labels.push(diff.primaryType === "substituteRemoved" ? "刪除替料" : "刪除料號");
-  if (diff.before && diff.after && diff.before.qty !== diff.after.qty) labels.push("數量差異");
+  if (diff.before && diff.after && bomQuantityChanged(diff.before, diff.after)) labels.push("數量差異");
   if (diff.processChange) labels.push(`製程別放置異常 ${diff.processChange.before} → ${diff.processChange.after}`);
   if (!labels.length) labels.push(...diff.fields);
   return [...new Set(labels)];
