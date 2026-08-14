@@ -17,24 +17,26 @@ export type ReportContext = {
 };
 
 const colors = {
-  navy: "1F3A5F",
-  blue: "2F6BCE",
+  navy: "163A63",
+  headerSecondary: "31597D",
+  blue: "2563C9",
   paleBlue: "EAF1FD",
-  green: "16835D",
-  paleGreen: "E8F7F0",
-  red: "B14949",
-  paleRed: "FFF0F0",
-  amber: "9A651B",
-  paleAmber: "FFF3DC",
-  gray: "667085",
-  paleGray: "F4F6F8",
-  oldVersion: "58677C",
-  paleOldVersion: "F2F4F7",
-  newVersion: "2F6BCE",
-  paleNewVersion: "EDF4FF",
+  green: "1F8B4C",
+  paleGreen: "EAF6EE",
+  red: "C43D3D",
+  paleRed: "FBECEC",
+  amber: "C98512",
+  paleAmber: "FCF4E6",
+  gray: "5B6B7C",
+  location: "7A8794",
+  paleGray: "F3F5F7",
+  body: "1F2D3D",
   white: "FFFFFF",
-  border: "D9E0E8",
+  border: "D7DEE8",
 };
+
+const reportFont = "Microsoft JhengHei";
+const reportBodySize = 11;
 
 const exportCategoryOrder = ["新版完全新料", "新增替代", "新版完全移除", "刪除替代", "數量差異", "TPN 差異", "製程別放置異常"] as const;
 type ExportCategory = (typeof exportCategoryOrder)[number];
@@ -55,8 +57,8 @@ const reportTexts = {
     sheets: { summary: "差異摘要", data: "差異資料", customer: "客戶 BOM TPN 對應", unmatched: "客戶 BOM 未對應列", mva: "MVA 明細", originalBefore: "舊版原始 BOM", originalAfter: "新版原始 BOM" },
     title: "BOM 差異比較報告", dataTitle: "BOM 差異資料｜依分類分表", workbookTitle: "BOM 差異清單",
     before: "舊版", after: "新版", beforeBom: "舊版 BOM", afterBom: "新版 BOM",
-    legend: "顏色說明｜淡紅：舊版刪除／停用料號　淡綠：新版新增／改用料號　灰／藍：料號未異動",
-    emptyCategory: "此分類無差異", noDifferences: "新舊版本沒有可匯出的差異",
+    legend: "顏色說明｜綠：新增　紅：刪除　黃：數量／製程變更　藍：TPN 差異　白／灰：未異動",
+    emptyCategory: "ⓘ　無符合條件的資料", noDifferences: "新舊版本沒有可匯出的差異",
     summaryNote: "閱讀版｜完整獨立欄位與分類表格請至「差異資料」工作表",
     noPartChange: "料號無增減", unavailable: "未提供料號", unmapped: "未對應", blank: "空白",
     added: "新增", removed: "刪除", changed: "變更", replacement: "換料",
@@ -66,8 +68,8 @@ const reportTexts = {
     sheets: { summary: "Difference Summary", data: "Difference Data", customer: "Customer TPN Mapping", unmatched: "Unmapped Customer BOM", mva: "MVA Details", originalBefore: "Original BOM - Old", originalAfter: "Original BOM - New" },
     title: "BOM Difference Comparison Report", dataTitle: "BOM Difference Data | Grouped by Category", workbookTitle: "BOM Difference List",
     before: "Old Version", after: "New Version", beforeBom: "Old BOM", afterBom: "New BOM",
-    legend: "Color legend | Light red: removed or retired in the old BOM   Light green: added or adopted in the new BOM   Gray/blue: unchanged part number",
-    emptyCategory: "No differences in this category", noDifferences: "No exportable differences between the old and new BOMs",
+    legend: "Color legend | Green: added   Red: removed   Amber: quantity/process change   Blue: TPN difference   White/gray: unchanged",
+    emptyCategory: "ⓘ  No matching records", noDifferences: "No exportable differences between the old and new BOMs",
     summaryNote: "Readable summary | See the Difference Data worksheet for separate columns and category tables",
     noPartChange: "No part number change", unavailable: "Part number unavailable", unmapped: "Unmapped", blank: "Blank",
     added: "Added", removed: "Removed", changed: "Changed", replacement: "Replacement",
@@ -80,7 +82,7 @@ function text(language: ReportLanguage) { return reportTexts[language]; }
 const sectionLabels: Record<ReportLanguage, Record<ExportSection, string>> = {
   "zh-TW": {
     新版完全新料: "新版完全新料", 新增替代: "新增替代", 新版完全移除: "新版完全移除", 刪除替代: "刪除替代",
-    數量差異: "數量差異", "TPN 差異": "TPN 差異", 製程別放置異常: "架構／製程變更", 僅插件位置差異: "僅插件位置差異",
+    數量差異: "數量差異", "TPN 差異": "TPN 差異", 製程別放置異常: "架構／製程變更", 僅插件位置差異: "插件位置異動（數量不變）",
   },
   en: {
     新版完全新料: "Completely New Parts",
@@ -90,7 +92,7 @@ const sectionLabels: Record<ReportLanguage, Record<ExportSection, string>> = {
     數量差異: "Quantity Differences",
     "TPN 差異": "TPN Differences",
     製程別放置異常: "Structure / Process Changes",
-    僅插件位置差異: "Location-only Differences",
+    僅插件位置差異: "Location Change (Quantity Unchanged)",
   },
 };
 
@@ -112,8 +114,8 @@ function dataHeaders(language: ReportLanguage) { return [language === "en" ? "Ca
 
 function summaryColumnGroups(language: ReportLanguage) {
   const labels = language === "en"
-    ? ["Primary Change", "Difference Items", "Part Number Change", "Location Difference", "Old Part Information", "→", "New Part Information", "Quantity"]
-    : ["主要異動", "差異項目", "料號異動", "插件位置差異", "舊版料號資訊", "→", "新版料號資訊", "數量"];
+    ? ["Primary Change", "Difference Items", "Details", "Location Difference", "Old BOM (Baseline)", "→", "New BOM (Comparison)", "Quantity"]
+    : ["主要異動", "差異項目", "詳細說明", "插件位置差異", "舊版 BOM（基準）", "→", "新版 BOM（比較）", "數量"];
   return [
     { label: labels[0], start: 1, end: 2 }, { label: labels[1], start: 3, end: 4 },
     { label: labels[2], start: 5, end: 6 }, { label: labels[3], start: 7, end: 8 },
@@ -124,8 +126,8 @@ function summaryColumnGroups(language: ReportLanguage) {
 
 function summarySubHeaders(language: ReportLanguage) {
   const labels = language === "en"
-    ? ["Added / Removed / Changed", "Difference Tags", "Added / Removed Part", "Location", "Old Part Number", "Old Manufacturer Part Number", "Old Manufacturer", "Old BOM R-column TPN", "→", "New Part Number", "New Manufacturer Part Number", "New Manufacturer", "New BOM R-column TPN", "Old → New"]
-    : ["新增／刪除／變更", "差異標籤", "料號新增／刪除", "插件位置", "舊版料號", "舊版製造商料號", "舊版製造商", "舊版 BOM R欄 TPN", "→", "新版料號", "新版製造商料號", "新版製造商", "新版 BOM R欄 TPN", "舊版 → 新版"];
+    ? ["Added / Removed / Changed", "Difference Tags", "Change Details", "Location", "Old Part Number", "Old Manufacturer Part Number", "Old Manufacturer", "Old BOM Usage TPN", "→", "New Part Number", "New Manufacturer Part Number", "New Manufacturer", "New BOM Usage TPN", "Old → New"]
+    : ["新增／刪除／變更", "差異標籤", "異動內容", "插件位置", "舊版料號", "舊版製造商料號", "舊版製造商", "舊版 BOM 用料 TPN", "→", "新版料號", "新版製造商料號", "新版製造商", "新版 BOM 用料 TPN", "舊版 → 新版"];
   return [
     { label: labels[0], start: 1, end: 2 }, { label: labels[1], start: 3, end: 4 },
     { label: labels[2], start: 5, end: 6 }, { label: labels[3], start: 7, end: 8 },
@@ -352,8 +354,8 @@ function styleChangedPartCells(row: ExcelJS.Row, columns: number[], tone: "remov
     const cell = row.getCell(column);
     cell.fill = fill(background);
     cell.font = {
-      name: "Microsoft JhengHei",
-      size: 10,
+      name: reportFont,
+      size: reportBodySize,
       bold: index === 0,
       color: { argb: foreground },
     };
@@ -366,23 +368,68 @@ function styleChangedPartCells(row: ExcelJS.Row, columns: number[], tone: "remov
   });
 }
 
+function styleChangedAttributeCells(row: ExcelJS.Row, columns: number[], tone: "tpn" | "change") {
+  const foreground = tone === "tpn" ? colors.blue : colors.amber;
+  const background = tone === "tpn" ? colors.paleBlue : colors.paleAmber;
+  columns.forEach((column) => {
+    const cell = row.getCell(column);
+    cell.fill = fill(background);
+    cell.font = { name: reportFont, size: reportBodySize, bold: true, color: { argb: foreground } };
+    cell.border = {
+      ...border(),
+      bottom: { style: "medium", color: { argb: foreground } },
+    };
+  });
+}
+
+function stylePositionCells(row: ExcelJS.Row, columns: number[]) {
+  columns.forEach((column) => {
+    const cell = row.getCell(column);
+    cell.fill = fill(colors.paleGray);
+    cell.font = { name: reportFont, size: reportBodySize, bold: true, color: { argb: colors.location } };
+  });
+}
+
 function styleTitle(sheet: ExcelJS.Worksheet, range: string, title: string) {
   sheet.mergeCells(range);
   const cell = sheet.getCell(range.split(":")[0]);
   cell.value = title;
-  cell.font = { name: "Microsoft JhengHei", size: 18, bold: true, color: { argb: colors.white } };
+  cell.font = { name: reportFont, size: 22, bold: true, color: { argb: colors.white } };
   cell.fill = fill(colors.navy);
-  cell.alignment = { vertical: "middle", horizontal: "left" };
+  cell.alignment = { vertical: "middle", horizontal: "center" };
+  cell.border = {
+    bottom: { style: "medium", color: { argb: colors.headerSecondary } },
+  };
 }
 
 function styleHeader(row: ExcelJS.Row) {
-  row.height = 32;
+  row.height = 36;
   row.eachCell((cell) => {
-    cell.font = { name: "Microsoft JhengHei", size: 10, bold: true, color: { argb: colors.white } };
-    cell.fill = fill(colors.blue);
+    cell.font = { name: reportFont, size: 11, bold: true, color: { argb: colors.white } };
+    cell.fill = fill(colors.navy);
     cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
     cell.border = border();
   });
+}
+
+function styleReviewStatusCell(cell: ExcelJS.Cell) {
+  const status = String(cell.value ?? "");
+  const hasHardMismatch = status.includes("未匹配") || status.includes("不足") || status.includes("Mismatch") || status.includes("Insufficient");
+  const needsReview = hasHardMismatch
+    || status.includes("候選")
+    || status.includes("請 RD 維護")
+    || status.includes("待確認")
+    || status.includes("Candidate")
+    || status.includes("Review")
+    || status.includes("Maintain");
+  if (!needsReview) return;
+  cell.fill = fill(hasHardMismatch ? colors.paleRed : colors.paleAmber);
+  cell.font = {
+    name: reportFont,
+    size: reportBodySize,
+    bold: true,
+    color: { argb: hasHardMismatch ? colors.red : colors.amber },
+  };
 }
 
 function sectionTone(section: ExportSection) {
@@ -398,35 +445,56 @@ function sectionTone(section: ExportSection) {
   if (section === "製程別放置異常") {
     return { foreground: colors.amber, background: colors.paleAmber };
   }
+  if (section === "僅插件位置差異") {
+    return { foreground: colors.location, background: colors.paleGray };
+  }
   return { foreground: colors.blue, background: colors.paleBlue };
+}
+
+function sectionHeaderBackground(section: ExportSection) {
+  if (section === "新版完全新料" || section === "新增替代") return "F8FCF9";
+  if (section === "新版完全移除" || section === "刪除替代") return "FFF8F8";
+  if (section === "數量差異" || section === "製程別放置異常") return "FFFBF3";
+  if (section === "僅插件位置差異") return colors.paleGray;
+  return "F8FAFE";
 }
 
 function styleSummarySectionTitle(sheet: ExcelJS.Worksheet, rowNumber: number, section: ExportSection, count: number, language: ReportLanguage) {
   sheet.mergeCells(rowNumber, 1, rowNumber, 19);
   const row = sheet.getRow(rowNumber);
-  row.height = 24;
+  row.height = count === 0 ? 17 : 27;
   const cell = row.getCell(1);
   const tone = sectionTone(section);
   cell.value = `${sectionLabels[language][section]}（${count}）`;
-  cell.font = { name: "Microsoft JhengHei", size: 11, bold: true, color: { argb: tone.foreground } };
-  cell.fill = fill(tone.background);
+  cell.font = {
+    name: reportFont,
+    size: count === 0 ? 10 : 12,
+    bold: count > 0,
+    color: { argb: count === 0 ? colors.gray : tone.foreground },
+  };
+  cell.fill = fill(count === 0 ? "F8FAFC" : sectionHeaderBackground(section));
   cell.alignment = { vertical: "middle", horizontal: "left" };
-  cell.border = border();
+  cell.border = {
+    ...border(),
+    left: { style: count === 0 ? "thin" : "medium", color: { argb: count === 0 ? colors.border : tone.foreground } },
+    bottom: { style: "thin", color: { argb: count === 0 ? colors.border : tone.foreground } },
+  };
 }
 
 function styleDataSectionTitle(sheet: ExcelJS.Worksheet, rowNumber: number, section: ExportSection, count: number, language: ReportLanguage) {
   sheet.mergeCells(rowNumber, 1, rowNumber, 18);
   const row = sheet.getRow(rowNumber);
-  row.height = 26;
+  row.height = 27;
   const cell = row.getCell(1);
   const tone = sectionTone(section);
   cell.value = `${sectionLabels[language][section]}（${count}）`;
-  cell.font = { name: "Microsoft JhengHei", size: 12, bold: true, color: { argb: tone.foreground } };
-  cell.fill = fill(tone.background);
+  cell.font = { name: reportFont, size: 13, bold: true, color: { argb: tone.foreground } };
+  cell.fill = fill(sectionHeaderBackground(section));
   cell.alignment = { vertical: "middle", horizontal: "left" };
   cell.border = {
     ...border(),
     left: { style: "medium", color: { argb: tone.foreground } },
+    bottom: { style: "thin", color: { argb: tone.foreground } },
   };
 }
 
@@ -449,30 +517,25 @@ function styleDataRow(row: ExcelJS.Row, diff: BomDiff, striped: boolean, section
   const afterParts = diff.after?.alternatives ?? [];
   const beforeQty = diff.before?.qty ?? 0;
   const afterQty = diff.after?.qty ?? 0;
-  const quantityTrend = afterQty > beforeQty ? "Increase" : afterQty < beforeQty ? "Decrease" : "Same";
-  row.height = Math.max(beforeParts.length, afterParts.length) > 1 ? 54 : 36;
+  row.height = Math.max(beforeParts.length, afterParts.length) > 1 ? 60 : 40;
   row.eachCell({ includeEmpty: true }, (cell) => {
-    cell.font = { name: "Microsoft JhengHei", size: 10, color: { argb: "344054" } };
+    cell.font = { name: reportFont, size: reportBodySize, color: { argb: colors.body } };
     cell.alignment = { vertical: "middle", wrapText: true };
     cell.border = border();
     if (striped) cell.fill = fill("FAFBFC");
   });
   const categoryCell = row.getCell(1);
   const categoryTone = sectionTone(section);
-  categoryCell.font = { name: "Microsoft JhengHei", size: 10, bold: true, color: { argb: categoryTone.foreground } };
-  categoryCell.fill = fill(categoryTone.background);
+  categoryCell.font = { name: reportFont, size: reportBodySize, bold: true, color: { argb: categoryTone.foreground } };
   const typeCell = row.getCell(2);
   const isAdded = diff.primaryType === "componentAdded" || diff.primaryType === "substituteAdded";
   const isRemoved = diff.primaryType === "componentRemoved" || diff.primaryType === "substituteRemoved";
   const tone = isAdded
-    ? { font: colors.green, fill: colors.paleGreen }
+    ? { font: colors.green }
     : isRemoved
-      ? { font: colors.red, fill: colors.paleRed }
-      : { font: colors.blue, fill: colors.paleBlue };
-  typeCell.font = { name: "Microsoft JhengHei", size: 10, bold: true, color: { argb: tone.font } };
-  typeCell.fill = fill(tone.fill);
-  [6, 7, 8, 9, 10, 16].forEach((column) => { row.getCell(column).fill = fill(colors.paleOldVersion); });
-  [11, 12, 13, 14, 15, 17].forEach((column) => { row.getCell(column).fill = fill(colors.paleNewVersion); });
+      ? { font: colors.red }
+      : { font: colors.blue };
+  typeCell.font = { name: reportFont, size: reportBodySize, bold: true, color: { argb: tone.font } };
   const partSpecificSection = ["新版完全新料", "新增替代", "新版完全移除", "刪除替代"].includes(section);
   const emphasizeRemoved = section === "新版完全移除" || section === "刪除替代" || !partSpecificSection;
   const emphasizeAdded = section === "新版完全新料" || section === "新增替代" || !partSpecificSection;
@@ -482,23 +545,26 @@ function styleDataRow(row: ExcelJS.Row, diff: BomDiff, striped: boolean, section
   if (emphasizeAdded && afterParts.length > 0 && afterParts.every((part) => includesPart(diff.addedParts, part))) {
     styleChangedPartCells(row, [11, 12, 13, 14], "added");
   }
-  [10, 15].forEach((column) => {
-    const status = String(row.getCell(column).value ?? "");
-    if (status.includes("未匹配") || status.includes("不足") || status.includes("候選")) {
-      row.getCell(column).fill = fill(colors.paleRed);
-      row.getCell(column).font = { name: "Microsoft JhengHei", size: 10, bold: true, color: { argb: colors.red } };
-    }
-  });
+  if (section === "TPN 差異") styleChangedAttributeCells(row, [9, 14], "tpn");
+  if (section === "製程別放置異常") styleChangedAttributeCells(row, [3], "change");
+  if (section === "僅插件位置差異") stylePositionCells(row, [5]);
+  [10, 15].forEach((column) => styleReviewStatusCell(row.getCell(column)));
   row.getCell(16).numFmt = "#,##0.##########";
   row.getCell(17).numFmt = "#,##0.##########";
   const trendCell = row.getCell(18);
+  const addedSection = section === "新版完全新料" || section === "新增替代";
+  const removedSection = section === "新版完全移除" || section === "刪除替代";
+  const quantityChanged = afterQty !== beforeQty;
+  const trendForeground = !quantityChanged ? colors.gray : addedSection ? colors.green : removedSection ? colors.red : colors.amber;
+  const trendBackground = !quantityChanged ? null : addedSection ? colors.paleGreen : removedSection ? colors.paleRed : colors.paleAmber;
   trendCell.font = {
-    name: "Microsoft JhengHei",
-    size: 10,
+    name: reportFont,
+    size: reportBodySize,
     bold: true,
-    color: { argb: quantityTrend === "Increase" ? colors.green : quantityTrend === "Decrease" ? colors.red : colors.gray },
+    color: { argb: trendForeground },
   };
-  trendCell.fill = fill(quantityTrend === "Increase" ? colors.paleGreen : quantityTrend === "Decrease" ? colors.paleRed : colors.paleGray);
+  if (trendBackground) trendCell.fill = fill(trendBackground);
+  if (section === "數量差異") styleChangedAttributeCells(row, [16, 17, 18], "change");
 }
 
 function styleSummaryHeaderRow(
@@ -511,13 +577,71 @@ function styleSummaryHeaderRow(
     if (group.end > group.start) sheet.mergeCells(rowNumber, group.start, rowNumber, group.end);
     const cell = sheet.getRow(rowNumber).getCell(group.start);
     cell.value = group.label;
-    cell.font = { name: "Microsoft JhengHei", size: 10, bold: true, color: { argb: colors.white } };
-    const groupColor = group.tone === "old" ? colors.oldVersion : group.tone === "new" ? colors.newVersion : color;
-    cell.fill = fill(groupColor);
+    cell.font = { name: reportFont, size: 11, bold: true, color: { argb: colors.white } };
+    cell.fill = fill(color);
     cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
     cell.border = border();
   });
-  sheet.getRow(rowNumber).height = 28;
+  sheet.getRow(rowNumber).height = 32;
+}
+
+type MvaCountKey = "smtTop" | "smtBottom" | "dipTop" | "dipBottom";
+
+function mvaValue(summary: MvaSummary | null | undefined, key: MvaCountKey) {
+  return summary ? summary[key] : "—";
+}
+
+function writeMvaSummary(
+  sheet: ExcelJS.Worksheet,
+  startRow: number,
+  before: MvaSummary | null | undefined,
+  after: MvaSummary | null | undefined,
+  language: ReportLanguage,
+) {
+  if (!before && !after) return 0;
+  const labels = language === "en"
+    ? { title: "MVA Summary", before: "Old", after: "New", change: "Change" }
+    : { title: "MVA 摘要", before: "舊版", after: "新版", change: "差值" };
+  const metrics: Array<{ key: MvaCountKey; label: string }> = [
+    { key: "smtTop", label: "SMT Top" },
+    { key: "smtBottom", label: "SMT Bottom" },
+    { key: "dipTop", label: "DIP Top" },
+    { key: "dipBottom", label: "DIP Bottom" },
+  ];
+  sheet.mergeCells(startRow, 1, startRow, 19);
+  const titleCell = sheet.getRow(startRow).getCell(1);
+  titleCell.value = labels.title;
+  titleCell.font = { name: reportFont, size: 12, bold: true, color: { argb: colors.navy } };
+  titleCell.fill = fill(colors.paleGray);
+  titleCell.alignment = { vertical: "middle", horizontal: "left" };
+  titleCell.border = { ...border(), left: { style: "medium", color: { argb: colors.navy } } };
+  sheet.getRow(startRow).height = 26;
+
+  [
+    { label: labels.before, summary: before, start: 1, end: 9 },
+    { label: labels.after, summary: after, start: 10, end: 18 },
+  ].forEach(({ label, summary, start, end }) => {
+    sheet.mergeCells(startRow + 1, start, startRow + 1, end);
+    const cell = sheet.getRow(startRow + 1).getCell(start);
+    cell.value = `${label}　${metrics.map(({ key, label: metric }) => `${metric} ${mvaValue(summary, key)}`).join("｜")}`;
+    cell.font = { name: reportFont, size: 10, bold: true, color: { argb: colors.body } };
+    cell.fill = fill(colors.white);
+    cell.alignment = { vertical: "middle", horizontal: "left", wrapText: true };
+    cell.border = border();
+  });
+  const changedMetrics = metrics.flatMap(({ key, label }) => {
+    if (!before || !after) return [];
+    const delta = after[key] - before[key];
+    return delta === 0 ? [] : [`${label} ${delta > 0 ? "+" : ""}${delta}`];
+  });
+  const changeCell = sheet.getRow(startRow + 1).getCell(19);
+  changeCell.value = `${labels.change}\n${changedMetrics.length ? changedMetrics.join("\n") : "—"}`;
+  changeCell.font = { name: reportFont, size: 10, bold: true, color: { argb: changedMetrics.length ? colors.amber : colors.gray } };
+  changeCell.fill = fill(changedMetrics.length ? colors.paleAmber : colors.paleGray);
+  changeCell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+  changeCell.border = border();
+  sheet.getRow(startRow + 1).height = Math.max(32, 20 + changedMetrics.length * 12);
+  return 2;
 }
 
 function writeSummaryDiffRows(
@@ -535,10 +659,10 @@ function writeSummaryDiffRows(
   const endRow = startRow + partRowCount - 1;
   for (let rowNumber = startRow; rowNumber <= endRow; rowNumber += 1) {
     const row = sheet.getRow(rowNumber);
-    row.height = 34;
+    row.height = 40;
     for (let column = 1; column <= 19; column += 1) {
       const cell = row.getCell(column);
-      cell.font = { name: "Microsoft JhengHei", size: 10, color: { argb: "344054" } };
+      cell.font = { name: reportFont, size: reportBodySize, color: { argb: colors.body } };
       cell.alignment = { vertical: "middle", horizontal: column === 13 || column >= 18 ? "center" : "left", wrapText: true };
       cell.border = border();
       if (striped) cell.fill = fill("FAFBFC");
@@ -576,35 +700,34 @@ function writeSummaryDiffRows(
     partRow.getCell(15).value = afterPart?.manufacturerPart ?? "";
     partRow.getCell(16).value = afterPart?.manufacturerName ?? "";
     partRow.getCell(17).value = summaryPartTpnValue(afterPart, customerBomMapped.after, language);
-    [9, 10, 11, 12].forEach((column) => { partRow.getCell(column).fill = fill(colors.paleOldVersion); });
-    [14, 15, 16, 17].forEach((column) => { partRow.getCell(column).fill = fill(colors.paleNewVersion); });
-    partRow.getCell(9).font = { name: "Microsoft JhengHei", size: 10, bold: index === 0, color: { argb: "344054" } };
-    partRow.getCell(14).font = { name: "Microsoft JhengHei", size: 10, bold: index === 0, color: { argb: "344054" } };
+    partRow.getCell(9).font = { name: reportFont, size: reportBodySize, bold: index === 0, color: { argb: colors.body } };
+    partRow.getCell(14).font = { name: reportFont, size: reportBodySize, bold: index === 0, color: { argb: colors.body } };
     if (includesPart(diff.removedParts, beforePart)) styleChangedPartCells(partRow, [9, 10, 11, 12], "removed");
     if (includesPart(diff.addedParts, afterPart)) styleChangedPartCells(partRow, [14, 15, 16, 17], "added");
-    [12, 17].forEach((column) => {
-      const value = String(partRow.getCell(column).value ?? "");
-      if (value.includes("請 RD 維護") || value.includes("未匹配") || value.includes("不足") || value.includes("候選")) {
-        partRow.getCell(column).fill = fill(colors.paleRed);
-        partRow.getCell(column).font = { name: "Microsoft JhengHei", size: 10, bold: true, color: { argb: colors.red } };
-      }
-    });
+    if (section === "TPN 差異") styleChangedAttributeCells(partRow, [12, 17], "tpn");
+    [12, 17].forEach((column) => styleReviewStatusCell(partRow.getCell(column)));
   }
 
   const tone = sectionTone(section);
   const typeCell = row.getCell(1);
-  typeCell.font = { name: "Microsoft JhengHei", size: 10, bold: true, color: { argb: tone.foreground } };
-  typeCell.fill = fill(tone.background);
+  typeCell.font = { name: reportFont, size: reportBodySize, bold: true, color: { argb: tone.foreground } };
   const arrowCell = row.getCell(13);
-  arrowCell.font = { name: "Microsoft JhengHei", size: 16, bold: true, color: { argb: tone.foreground } };
+  arrowCell.font = { name: reportFont, size: 17, bold: true, color: { argb: tone.foreground } };
   const quantityCell = row.getCell(18);
+  const addedSection = section === "新版完全新料" || section === "新增替代";
+  const removedSection = section === "新版完全移除" || section === "刪除替代";
+  const quantityChanged = afterQty !== beforeQty;
+  const quantityForeground = !quantityChanged ? colors.gray : addedSection ? colors.green : removedSection ? colors.red : colors.amber;
+  const quantityBackground = !quantityChanged ? null : addedSection ? colors.paleGreen : removedSection ? colors.paleRed : colors.paleAmber;
   quantityCell.font = {
-    name: "Microsoft JhengHei",
-    size: 11,
+    name: reportFont,
+    size: 12,
     bold: true,
-    color: { argb: afterQty > beforeQty ? colors.green : afterQty < beforeQty ? colors.red : colors.gray },
+    color: { argb: quantityForeground },
   };
-  quantityCell.fill = fill(afterQty > beforeQty ? colors.paleGreen : afterQty < beforeQty ? colors.paleRed : colors.paleGray);
+  if (quantityBackground) quantityCell.fill = fill(quantityBackground);
+  if (section === "製程別放置異常") styleChangedAttributeCells(row, [3], "change");
+  if (section === "僅插件位置差異") stylePositionCells(row, [7]);
   return endRow + 1;
 }
 
@@ -723,11 +846,12 @@ function mappingReason(reason: string, language: ReportLanguage, status?: string
 function appendCustomerMappingSheet(workbook: ExcelJS.Workbook, before: CustomerMappingResult | null | undefined, after: CustomerMappingResult | null | undefined, language: ReportLanguage) {
   if (!before && !after) return;
   const t = text(language);
-  const sheet = workbook.addWorksheet(t.sheets.customer, { properties: { defaultRowHeight: 28 } });
+  const sheet = workbook.addWorksheet(t.sheets.customer, { properties: { defaultRowHeight: 30, tabColor: { argb: colors.blue } } });
   const headers = language === "en"
     ? ["Version", "Mapping Status", "Role", "Company Part Number", "Company Manufacturer Part Number", "Location", "Customer BOM TPN", "BOM R-column TPN", "BOM S-column Association", "Notes"]
     : ["版本", "配對狀態", "角色", "公司料號", "公司製造廠商料號", "Location", "客戶 BOM TPN", "BOM R欄 TPN", "BOM S欄關聯", "說明"];
   styleTitle(sheet, "A1:J1", language === "en" ? "Customer BOM TPN Mapping by Company Primary and Substitute Part" : "客戶 BOM TPN－公司主料／替料逐顆對應結果");
+  sheet.getRow(1).height = 44;
   sheet.getRow(2).values = headers;
   styleHeader(sheet.getRow(2));
   const entries = ([[t.before, before], [t.after, after]] as const).flatMap(([version, result]) =>
@@ -747,30 +871,30 @@ function appendCustomerMappingSheet(workbook: ExcelJS.Workbook, before: Customer
       row.customerAssociationEvidence.join("\n"),
       mappingReason(row.reason, language, row.status),
     ];
-    target.height = 36;
+    target.height = 40;
     target.eachCell({ includeEmpty: true }, (cell) => {
-      cell.font = { name: "Microsoft JhengHei", size: 10, color: { argb: "344054" } };
+      cell.font = { name: reportFont, size: reportBodySize, color: { argb: colors.body } };
       cell.alignment = { vertical: "middle", wrapText: true };
       cell.border = border();
       if (index % 2) cell.fill = fill("FAFBFC");
     });
     if (row.status === "matched") {
       target.getCell(2).fill = fill(colors.paleGreen);
-      target.getCell(2).font = { name: "Microsoft JhengHei", size: 10, bold: true, color: { argb: colors.green } };
+      target.getCell(2).font = { name: reportFont, size: reportBodySize, bold: true, color: { argb: colors.green } };
     } else if (row.status === "rd-maintenance-missing" || row.status === "rd-maintenance-mismatch") {
       [2, 7, 8, 10].forEach((column) => {
-        target.getCell(column).fill = fill("FFF3DC");
-        target.getCell(column).font = { name: "Microsoft JhengHei", size: 10, bold: true, color: { argb: colors.amber } };
+        target.getCell(column).fill = fill(colors.paleAmber);
+        target.getCell(column).font = { name: reportFont, size: reportBodySize, bold: true, color: { argb: colors.amber } };
       });
     } else if (row.status === "tpn-association-mismatch" || row.status === "tpn-association-invalid") {
       [2, 7, 8, 9, 10].forEach((column) => {
         target.getCell(column).fill = fill(row.status === "tpn-association-invalid" ? colors.paleAmber : colors.paleRed);
-        target.getCell(column).font = { name: "Microsoft JhengHei", size: 10, bold: true, color: { argb: row.status === "tpn-association-invalid" ? colors.amber : colors.red } };
+        target.getCell(column).font = { name: reportFont, size: reportBodySize, bold: true, color: { argb: row.status === "tpn-association-invalid" ? colors.amber : colors.red } };
       });
     } else {
       [2, 5, 6, 7].forEach((column) => {
         target.getCell(column).fill = fill(row.status === "location-unmatched" ? colors.paleAmber : colors.paleRed);
-        target.getCell(column).font = { name: "Microsoft JhengHei", size: 10, bold: true, color: { argb: row.status === "location-unmatched" ? colors.amber : colors.red } };
+        target.getCell(column).font = { name: reportFont, size: reportBodySize, bold: true, color: { argb: row.status === "location-unmatched" ? colors.amber : colors.red } };
       });
     }
   });
@@ -785,8 +909,9 @@ function appendCustomerMappingSheet(workbook: ExcelJS.Workbook, before: Customer
       .map((row) => ({ version, row })),
   );
   if (!unmatchedEntries.length) return;
-  const unmatched = workbook.addWorksheet(t.sheets.unmatched, { properties: { defaultRowHeight: 28 } });
+  const unmatched = workbook.addWorksheet(t.sheets.unmatched, { properties: { defaultRowHeight: 30, tabColor: { argb: colors.amber } } });
   styleTitle(unmatched, "A1:H1", language === "en" ? "Customer BOM Records Not Fully Mapped" : "客戶 BOM 未完整對應資料");
+  unmatched.getRow(1).height = 44;
   unmatched.getRow(2).values = language === "en"
     ? ["Version", "Status", "Customer BOM TPN", "Location", "Customer Manufacturer Part Number", "Matched Company Part Number", "Notes", "Customer BOM Source Row"]
     : ["版本", "狀態", "客戶 BOM TPN", "Location", "客戶製造廠商料號", "已命中公司料號", "說明", "客戶 BOM 原始列"];
@@ -794,15 +919,15 @@ function appendCustomerMappingSheet(workbook: ExcelJS.Workbook, before: Customer
   unmatchedEntries.forEach(({ version, row }, index) => {
     const target = unmatched.getRow(index + 3);
     target.values = [version, customerStatusLabel({ customerMappingStatus: row.status } as BomDiff["before"], language), row.record.customerPartNumber, row.record.positions.join("\n"), row.record.manufacturerParts.join("\n"), row.companyPartNumbers.join("\n"), mappingReason(row.reason, language, row.status), row.record.sourceRow];
-    target.height = 38;
+    target.height = 42;
     target.eachCell({ includeEmpty: true }, (cell) => {
-      cell.font = { name: "Microsoft JhengHei", size: 10, color: { argb: "344054" } };
+      cell.font = { name: reportFont, size: reportBodySize, color: { argb: colors.body } };
       cell.alignment = { vertical: "middle", wrapText: true };
       cell.border = border();
     });
     [2, 3, 4, 5].forEach((column) => {
       target.getCell(column).fill = fill(colors.paleRed);
-      target.getCell(column).font = { name: "Microsoft JhengHei", size: 10, bold: true, color: { argb: colors.red } };
+      target.getCell(column).font = { name: reportFont, size: reportBodySize, bold: true, color: { argb: colors.red } };
     });
   });
   [10, 18, 26, 28, 34, 28, 68, 16].forEach((width, index) => { unmatched.getColumn(index + 1).width = width; });
@@ -813,8 +938,9 @@ function appendCustomerMappingSheet(workbook: ExcelJS.Workbook, before: Customer
 function appendMvaSheet(workbook: ExcelJS.Workbook, before: MvaSummary | null | undefined, after: MvaSummary | null | undefined, language: ReportLanguage) {
   if (!before && !after) return;
   const t = text(language);
-  const sheet = workbook.addWorksheet(t.sheets.mva, { properties: { defaultRowHeight: 26 } });
+  const sheet = workbook.addWorksheet(t.sheets.mva, { properties: { defaultRowHeight: 28, tabColor: { argb: colors.amber } } });
   styleTitle(sheet, "A1:G1", language === "en" ? "MVA Process Counts and Excluded Records" : "MVA 製程顆數與未計入明細");
+  sheet.getRow(1).height = 44;
   sheet.getRow(3).values = language === "en" ? ["Version", "SMT Top", "SMT Bottom", "DIP Top", "DIP Bottom", "Included Total", "Excluded"] : ["版本", "SMT Top", "SMT Bottom", "DIP Top", "DIP Bottom", "計入合計", "未計入"];
   styleHeader(sheet.getRow(3));
   ([[t.before, before], [t.after, after]] as const).forEach(([version, result], index) => {
@@ -829,7 +955,7 @@ function appendMvaSheet(workbook: ExcelJS.Workbook, before: MvaSummary | null | 
     result?.included.forEach((record) => {
       const row = sheet.getRow(rowNumber++);
       row.values = [version, language === "en" ? "Included" : "已計入", record.designator, record.side, record.process, `${record.part}${record.structure ? `\n${record.structure}` : ""}`, ""];
-      row.getCell(2).font = { name: "Microsoft JhengHei", bold: true, color: { argb: colors.green } };
+      row.getCell(2).font = { name: reportFont, size: reportBodySize, bold: true, color: { argb: colors.green } };
     });
     result?.excluded.forEach((record) => {
       const row = sheet.getRow(rowNumber++);
@@ -840,14 +966,14 @@ function appendMvaSheet(workbook: ExcelJS.Workbook, before: MvaSummary | null | 
         "BOM 找不到可判定 SMT／DIP 的插件位置": "No BOM designator with an identifiable SMT/DIP process was found",
       }[record.reason] ?? "Excluded from the MVA count") : record.reason;
       row.values = [version, language === "en" ? "Excluded" : "未計入", record.designator, record.rawLayer, "", "", language === "en" ? `${reason} (source rows ${record.sourceRows.join(", ")})` : `${reason}（原始列 ${record.sourceRows.join("、")}）`];
-      [2, 7].forEach((column) => { row.getCell(column).fill = fill(colors.paleAmber); row.getCell(column).font = { name: "Microsoft JhengHei", bold: true, color: { argb: colors.amber } }; });
+      [2, 7].forEach((column) => { row.getCell(column).fill = fill(colors.paleAmber); row.getCell(column).font = { name: reportFont, size: reportBodySize, bold: true, color: { argb: colors.amber } }; });
     });
   });
   for (let row = 8; row < rowNumber; row += 1) {
     sheet.getRow(row).eachCell({ includeEmpty: true }, (cell) => {
       cell.alignment = { vertical: "middle", wrapText: true };
       cell.border = border();
-      if (!cell.font) cell.font = { name: "Microsoft JhengHei", size: 10, color: { argb: "344054" } };
+      if (!cell.font) cell.font = { name: reportFont, size: reportBodySize, color: { argb: colors.body } };
     });
   }
   [11, 12, 16, 13, 12, 30, 48].forEach((width, index) => { sheet.getColumn(index + 1).width = width; });
@@ -863,9 +989,9 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
   workbook.title = t.workbookTitle;
   workbook.subject = `${beforeName} → ${afterName}`;
 
-  const summarySheet = workbook.addWorksheet(t.sheets.summary, { properties: { defaultRowHeight: 26 } });
+  const summarySheet = workbook.addWorksheet(t.sheets.summary, { properties: { defaultRowHeight: 28, tabColor: { argb: colors.navy } } });
   styleTitle(summarySheet, "A1:S1", t.title);
-  summarySheet.getRow(1).height = 36;
+  summarySheet.getRow(1).height = 46;
   summarySheet.mergeCells("A2:B2");
   summarySheet.mergeCells("C2:H2");
   summarySheet.mergeCells("I2:J2");
@@ -875,10 +1001,16 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
   summarySheet.getCell("I2").value = t.afterBom;
   summarySheet.getCell("K2").value = afterName;
   ["A2", "I2"].forEach((address) => {
-    summarySheet.getCell(address).font = { name: "Microsoft JhengHei", bold: true, color: { argb: colors.gray } };
+    summarySheet.getCell(address).font = { name: reportFont, size: 11, bold: true, color: { argb: colors.gray } };
   });
-  for (let column = 1; column <= 8; column += 1) summarySheet.getCell(2, column).fill = fill(colors.paleOldVersion);
-  for (let column = 9; column <= 19; column += 1) summarySheet.getCell(2, column).fill = fill(colors.paleNewVersion);
+  ["C2", "K2"].forEach((address) => {
+    summarySheet.getCell(address).font = { name: reportFont, size: 12, bold: true, color: { argb: colors.body } };
+  });
+  summarySheet.getRow(2).height = 34;
+  for (let column = 1; column <= 19; column += 1) {
+    summarySheet.getCell(2, column).fill = fill(colors.white);
+    summarySheet.getCell(2, column).border = border();
+  }
 
   const cardRanges = ["A4:B5", "C4:D5", "E4:F5", "G4:H5", "I4:J5", "K4:L5", "M4:O5", "P4:S5"];
   exportSectionOrder.forEach((section, index) => {
@@ -887,24 +1019,41 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
     summarySheet.mergeCells(range);
     const cell = summarySheet.getCell(range.split(":")[0]);
     const tone = sectionTone(section);
-    cell.value = `${sectionLabels[language][section]}\n${sectionDiffs.length}`;
-    cell.font = { name: "Microsoft JhengHei", size: 11, bold: true, color: { argb: tone.foreground } };
-    cell.fill = fill(tone.background);
+    const cardForeground = sectionDiffs.length === 0 ? colors.gray : tone.foreground;
+    const cardBorder = sectionDiffs.length === 0 ? colors.border : tone.foreground;
+    cell.value = {
+      richText: [
+        { font: { name: reportFont, size: 10, bold: true, color: { argb: cardForeground } }, text: `${sectionLabels[language][section]}\n` },
+        { font: { name: reportFont, size: 23, bold: true, color: { argb: cardForeground } }, text: String(sectionDiffs.length) },
+      ],
+    };
+    cell.fill = fill(colors.white);
     cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
-    cell.border = border();
+    cell.border = {
+      ...border(),
+      top: { style: "medium", color: { argb: cardBorder } },
+    };
   });
-  summarySheet.mergeCells("A6:S6");
-  summarySheet.getCell("A6").value = t.legend;
-  summarySheet.getCell("A6").font = { name: "Microsoft JhengHei", size: 9, color: { argb: colors.gray } };
-  summarySheet.getCell("A6").alignment = { horizontal: "right", vertical: "middle" };
+  summarySheet.getRow(4).height = 30;
+  summarySheet.getRow(5).height = 30;
+  const mvaStartRow = 6;
+  const mvaRows = writeMvaSummary(summarySheet, mvaStartRow, context.mvaBefore, context.mvaAfter, language);
+  const legendRow = mvaStartRow + mvaRows;
+  summarySheet.mergeCells(legendRow, 1, legendRow, 19);
+  summarySheet.getRow(legendRow).getCell(1).value = t.legend;
+  summarySheet.getRow(legendRow).getCell(1).font = { name: reportFont, size: 10, color: { argb: colors.gray } };
+  summarySheet.getRow(legendRow).getCell(1).alignment = { horizontal: "right", vertical: "middle" };
+  summarySheet.getRow(legendRow).height = 20;
 
-  styleSummaryHeaderRow(summarySheet, 7, summaryColumnGroups(language), colors.navy);
-  styleSummaryHeaderRow(summarySheet, 8, summarySubHeaders(language), colors.blue);
+  const groupHeaderRow = legendRow + 1;
+  const subHeaderRow = legendRow + 2;
+  styleSummaryHeaderRow(summarySheet, groupHeaderRow, summaryColumnGroups(language), colors.navy);
+  styleSummaryHeaderRow(summarySheet, subHeaderRow, summarySubHeaders(language), colors.headerSecondary);
   const summaryCustomerBomMapped = {
     before: Boolean(context.customerBefore),
     after: Boolean(context.customerAfter),
   };
-  let summaryRow = 9;
+  let summaryRow = subHeaderRow + 1;
   const summaryDetailRows: number[] = [];
   exportSectionOrder.forEach((section) => {
     const sectionDiffs = diffs.filter((diff) => belongsToSection(diff, section));
@@ -916,25 +1065,15 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
         summaryRow = writeSummaryDiffRows(summarySheet, summaryRow, diff, section, index % 2 === 1, summaryCustomerBomMapped, language);
         for (let rowNumber = firstDetailRow; rowNumber < summaryRow; rowNumber += 1) summaryDetailRows.push(rowNumber);
       });
-    } else {
-      summarySheet.mergeCells(summaryRow, 1, summaryRow, 19);
-      const emptyCell = summarySheet.getRow(summaryRow).getCell(1);
-      emptyCell.value = t.emptyCategory;
-      emptyCell.font = { name: "Microsoft JhengHei", size: 10, italic: true, color: { argb: colors.gray } };
-      emptyCell.alignment = { horizontal: "center", vertical: "middle" };
-      emptyCell.fill = fill(colors.paleGray);
-      emptyCell.border = border();
-      summarySheet.getRow(summaryRow).height = 24;
-      summaryRow += 1;
     }
   });
   summarySheet.mergeCells(summaryRow + 1, 1, summaryRow + 1, 19);
   summarySheet.getCell(summaryRow + 1, 1).value = t.summaryNote;
-  summarySheet.getCell(summaryRow + 1, 1).font = { name: "Microsoft JhengHei", size: 9, italic: true, color: { argb: colors.gray } };
+  summarySheet.getCell(summaryRow + 1, 1).font = { name: reportFont, size: 10, italic: true, color: { argb: colors.gray } };
   summarySheet.getCell(summaryRow + 1, 1).alignment = { horizontal: "right", vertical: "middle" };
   fitColumns(summarySheet, summaryColumnFit);
-  fitWrappedRows(summarySheet, summaryDetailRows, 19, 34, 90);
-  summarySheet.views = [{ state: "frozen", ySplit: 8, showGridLines: false }];
+  fitWrappedRows(summarySheet, summaryDetailRows, 19, 40, 108);
+  summarySheet.views = [{ state: "frozen", ySplit: subHeaderRow, showGridLines: false }];
   summarySheet.pageSetup = {
     orientation: "landscape",
     fitToPage: true,
@@ -943,19 +1082,22 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
     margins: { left: 0.25, right: 0.25, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 },
   };
 
-  const dataSheet = workbook.addWorksheet(t.sheets.data, { properties: { defaultRowHeight: 28 } });
+  const dataSheet = workbook.addWorksheet(t.sheets.data, { properties: { defaultRowHeight: 30, tabColor: { argb: colors.green } } });
   styleTitle(dataSheet, "A1:R1", t.dataTitle);
-  dataSheet.getRow(1).height = 34;
+  dataSheet.getRow(1).height = 44;
   dataSheet.getCell("A2").value = t.beforeBom;
   dataSheet.getCell("B2").value = beforeName;
   dataSheet.getCell("D2").value = t.afterBom;
   dataSheet.getCell("E2").value = afterName;
   ["A2", "D2"].forEach((address) => {
-    dataSheet.getCell(address).font = { name: "Microsoft JhengHei", bold: true, color: { argb: colors.gray } };
+    dataSheet.getCell(address).font = { name: reportFont, size: 11, bold: true, color: { argb: colors.gray } };
+  });
+  ["B2", "E2"].forEach((address) => {
+    dataSheet.getCell(address).font = { name: reportFont, size: 11, bold: true, color: { argb: colors.body } };
   });
   dataSheet.mergeCells("A3:R3");
   dataSheet.getCell("A3").value = t.legend;
-  dataSheet.getCell("A3").font = { name: "Microsoft JhengHei", size: 9, color: { argb: colors.gray } };
+  dataSheet.getCell("A3").font = { name: reportFont, size: 10, color: { argb: colors.gray } };
   dataSheet.getCell("A3").alignment = { horizontal: "right", vertical: "middle" };
   let dataRow = 4;
   let hasDataSection = false;
@@ -977,8 +1119,6 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
       rows: sectionDiffs.map((diff) => [sectionLabels[language][section], ...detailRowValues(diff, section, language)]),
     });
     styleHeader(dataSheet.getRow(headerRow));
-    [6, 7, 8, 9, 10, 16].forEach((column) => { dataSheet.getRow(headerRow).getCell(column).fill = fill(colors.oldVersion); });
-    [11, 12, 13, 14, 15, 17].forEach((column) => { dataSheet.getRow(headerRow).getCell(column).fill = fill(colors.newVersion); });
     sectionDiffs.forEach((diff, index) => {
       const rowNumber = firstDataRow + index;
       styleDataRow(dataSheet.getRow(rowNumber), diff, index % 2 === 1, section);
@@ -990,13 +1130,13 @@ export function buildBomReport(diffs: BomDiff[], beforeName: string, afterName: 
     dataSheet.mergeCells("A4:R4");
     const emptyCell = dataSheet.getCell("A4");
     emptyCell.value = t.noDifferences;
-    emptyCell.font = { name: "Microsoft JhengHei", size: 11, italic: true, color: { argb: colors.gray } };
+    emptyCell.font = { name: reportFont, size: 12, italic: true, color: { argb: colors.gray } };
     emptyCell.fill = fill(colors.paleGray);
     emptyCell.alignment = { horizontal: "center", vertical: "middle" };
     emptyCell.border = border();
   }
   fitColumns(dataSheet, dataColumnFit);
-  fitWrappedRows(dataSheet, dataDetailRows, 18, 36, 96);
+  fitWrappedRows(dataSheet, dataDetailRows, 18, 40, 108);
   dataSheet.views = [{ state: "frozen", ySplit: 3, xSplit: 5, showGridLines: false }];
   dataSheet.pageSetup = {
     orientation: "landscape",

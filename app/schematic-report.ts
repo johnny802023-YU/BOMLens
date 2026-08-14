@@ -31,6 +31,14 @@ const PAGE_WIDTH = 1240;
 const PAGE_HEIGHT = 1754;
 const PDF_PAGE_WIDTH = 595.28;
 const PDF_PAGE_HEIGHT = 841.89;
+// 1240 x 1754 is roughly 150 DPI at A4 size. Render report pages at 2x
+// internally so exported PDFs retain roughly 300 DPI when zoomed or printed.
+const REPORT_PIXEL_RATIO = 2;
+const SCHEMATIC_RENDER_SCALE = 3;
+const SCHEMATIC_CROP_SIZE = 720 / 1.65;
+const SCHEMATIC_IMAGE_WIDTH = 1080;
+const SCHEMATIC_IMAGE_HEIGHT = 1120;
+const JPEG_QUALITY = 0.94;
 const FONT_FAMILY = '"Microsoft JhengHei","Noto Sans TC",Arial,sans-serif';
 
 function canvas(width = PAGE_WIDTH, height = PAGE_HEIGHT) {
@@ -38,6 +46,13 @@ function canvas(width = PAGE_WIDTH, height = PAGE_HEIGHT) {
   element.width = width;
   element.height = height;
   return element;
+}
+
+function reportCanvas() {
+  const element = canvas(PAGE_WIDTH * REPORT_PIXEL_RATIO, PAGE_HEIGHT * REPORT_PIXEL_RATIO);
+  const context = element.getContext("2d")!;
+  context.scale(REPORT_PIXEL_RATIO, REPORT_PIXEL_RATIO);
+  return { page: element, context };
 }
 
 function roundedRect(context: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
@@ -78,8 +93,7 @@ function drawText(context: CanvasRenderingContext2D, text: string, x: number, y:
 }
 
 function basePage(title: string, subtitle: string) {
-  const page = canvas();
-  const context = page.getContext("2d")!;
+  const { page, context } = reportCanvas();
   context.fillStyle = "#F3F5F8";
   context.fillRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT);
   context.fillStyle = "#1F3A5F";
@@ -113,7 +127,7 @@ async function renderReference(source: PdfReportSource, reference: string): Prom
   const hit = hits[0];
   if (!hit) return { hitCount: 0, status: "not-found" };
   const page = await source.document.getPage(hit.page);
-  const renderScale = 1.65;
+  const renderScale = SCHEMATIC_RENDER_SCALE;
   const viewport = page.getViewport({ scale: renderScale });
   const full = canvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
   const fullContext = full.getContext("2d")!;
@@ -121,27 +135,29 @@ async function renderReference(source: PdfReportSource, reference: string): Prom
   fullContext.fillRect(0, 0, full.width, full.height);
   await page.render({ canvas: full, canvasContext: fullContext, viewport }).promise;
 
-  const output = canvas(540, 560);
+  const output = canvas(SCHEMATIC_IMAGE_WIDTH, SCHEMATIC_IMAGE_HEIGHT);
   const context = output.getContext("2d")!;
   context.fillStyle = "#FFFFFF";
   context.fillRect(0, 0, output.width, output.height);
   const hitScale = renderScale / PDF_REFERENCE_INDEX_SCALE;
   const hitCenterX = (hit.x + hit.width / 2) * hitScale;
   const hitCenterY = (hit.y + hit.height / 2) * hitScale;
-  const cropWidth = Math.min(full.width, 720);
-  const cropHeight = Math.min(full.height, 720);
+  // Keep the same surrounding schematic area as the previous 1.65x / 720px
+  // crop while sampling it with substantially more source pixels.
+  const cropWidth = Math.min(full.width, Math.round(SCHEMATIC_CROP_SIZE * renderScale));
+  const cropHeight = Math.min(full.height, Math.round(SCHEMATIC_CROP_SIZE * renderScale));
   const sourceX = Math.min(Math.max(0, hitCenterX - cropWidth / 2), Math.max(0, full.width - cropWidth));
   const sourceY = Math.min(Math.max(0, hitCenterY - cropHeight / 2), Math.max(0, full.height - cropHeight));
   context.drawImage(full, sourceX, sourceY, cropWidth, cropHeight, 0, 0, output.width, output.height);
   const factorX = output.width / cropWidth;
   const factorY = output.height / cropHeight;
   context.strokeStyle = "#E13535";
-  context.lineWidth = 6;
+  context.lineWidth = 12;
   context.strokeRect(
     (hit.x * hitScale - sourceX - 7) * factorX,
     (hit.y * hitScale - sourceY - 7) * factorY,
-    Math.max(24, (hit.width * hitScale + 14) * factorX),
-    Math.max(24, (hit.height * hitScale + 14) * factorY),
+    Math.max(48, (hit.width * hitScale + 14) * factorX),
+    Math.max(48, (hit.height * hitScale + 14) * factorY),
   );
   full.width = 1;
   full.height = 1;
@@ -233,7 +249,7 @@ function detailPage(entry: SchematicReportPlanEntry, before: LocatedReference, a
 }
 
 async function addCanvasPage(pdf: PDFDocument, reportPage: HTMLCanvasElement) {
-  const jpg = reportPage.toDataURL("image/jpeg", 0.9);
+  const jpg = reportPage.toDataURL("image/jpeg", JPEG_QUALITY);
   const image = await pdf.embedJpg(jpg);
   const page = pdf.addPage([PDF_PAGE_WIDTH, PDF_PAGE_HEIGHT]);
   page.drawImage(image, { x: 0, y: 0, width: PDF_PAGE_WIDTH, height: PDF_PAGE_HEIGHT });

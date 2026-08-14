@@ -138,6 +138,22 @@ const diffs = compareBom(customerBefore.items, customerAfter.items).filter((diff
 const context = {
   customerBefore,
   customerAfter,
+  mvaBefore: {
+    smtTop: 126,
+    smtBottom: 42,
+    dipTop: 18,
+    dipBottom: 6,
+    included: [],
+    excluded: [],
+  },
+  mvaAfter: {
+    smtTop: 127,
+    smtBottom: 42,
+    dipTop: 18,
+    dipBottom: 6,
+    included: [],
+    excluded: [],
+  },
   originalBefore: {
     fileName: "Demo_舊版公司BOM.xlsx",
     sheetName: "舊版 BOM",
