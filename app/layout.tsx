@@ -13,7 +13,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const imageUrl = `${protocol}://${host}/og.png`;
   return {
     title: "BOMLens｜BOM 與線路圖版本比對",
-    description: "快速找出前後版 BOM 與線路圖的新增、移除和內容變更。",
+    description: "快速找出舊版與新版 BOM、線路圖的新增、刪除和內容變更。",
     icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
     openGraph: {
       title: "BOMLens｜BOM 與線路圖版本比對",

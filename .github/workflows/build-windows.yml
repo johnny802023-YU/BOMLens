@@ -1,0 +1,180 @@
+name: Build Windows packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - codex/publish-bomlens
+    tags:
+      - "v*"
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  build-windows:
+    name: Windows x64 packages
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate source
+        run: |
+          npm run lint
+          npm test
+
+      - name: Build portable package
+        shell: pwsh
+        run: ./scripts/build-windows-portable.ps1 -SkipBuild
+
+      - name: Verify portable runtime
+        shell: pwsh
+        run: |
+          $root = Resolve-Path "release/BOMLens-Windows-x64-Portable"
+          $node = Join-Path $root "runtime/node.exe"
+          $serverEntry = Join-Path $root "offline-server.mjs"
+          $portableExe = Join-Path $root "BOMLens.exe"
+          if (-not (Test-Path $portableExe)) { throw "BOMLens.exe 不存在。" }
+          ./scripts/verify-windows-icon.ps1 -ExecutablePath $portableExe -IconPath "public/BOMLens.ico"
+          $server = Start-Process -FilePath $node -ArgumentList @($serverEntry) -WorkingDirectory $root -WindowStyle Hidden -PassThru
+          try {
+            $ready = $false
+            $page = $null
+            foreach ($attempt in 1..40) {
+              try {
+                $page = Invoke-WebRequest "http://127.0.0.1:3784/" -UseBasicParsing -TimeoutSec 2
+                if ($page.StatusCode -eq 200) { $ready = $true; break }
+              } catch {
+                Start-Sleep -Milliseconds 500
+              }
+            }
+            if (-not $ready) { throw "Portable 本機服務未能在時限內啟動。" }
+            $cssMatch = [regex]::Match($page.Content, 'href="(?<path>/assets/[^\"]+\.css)"')
+            if (-not $cssMatch.Success) { throw "首頁沒有引用 BOMLens stylesheet。" }
+            $stylesheet = Invoke-WebRequest ("http://127.0.0.1:3784" + $cssMatch.Groups['path'].Value) -UseBasicParsing -TimeoutSec 10
+            if ($stylesheet.StatusCode -ne 200) { throw "Stylesheet 未回傳 HTTP 200。" }
+            if ($stylesheet.Headers['Content-Type'] -notmatch '^text/css') { throw "Stylesheet Content-Type 錯誤。" }
+            if ($stylesheet.Content.Length -lt 10000 -or $stylesheet.Content -notmatch '\.app-shell') { throw "Stylesheet 內容不完整，拒絕發布無樣式版本。" }
+          } finally {
+            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Locate Inno Setup
+        id: inno
+        shell: pwsh
+        run: |
+          $compiler = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $compiler) {
+            choco install innosetup --no-progress -y
+            $compiler = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          }
+          if (-not (Test-Path $compiler)) { throw "找不到 Inno Setup 編譯器。" }
+          "compiler=$compiler" >> $env:GITHUB_OUTPUT
+
+      - name: Build setup installer
+        shell: pwsh
+        run: '& "${{ steps.inno.outputs.compiler }}" scripts/BOMLens.iss'
+
+      - name: Verify setup installer
+        shell: pwsh
+        run: |
+          $setup = Resolve-Path "release/BOMLens-Setup-x64.exe"
+          ./scripts/verify-windows-icon.ps1 -ExecutablePath $setup -IconPath "public/BOMLens.ico"
+          $process = Start-Process -FilePath $setup -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "安裝程式測試失敗，ExitCode=$($process.ExitCode)" }
+          $installed = Join-Path $env:LOCALAPPDATA "Programs/BOMLens/BOMLens.exe"
+          if (-not (Test-Path $installed)) { throw "安裝後找不到 BOMLens.exe。" }
+          ./scripts/verify-windows-icon.ps1 -ExecutablePath $installed -IconPath "public/BOMLens.ico"
+
+      - name: Create checksums
+        shell: pwsh
+        run: |
+          $files = @(
+            "release/BOMLens-Windows-x64-Portable.zip",
+            "release/BOMLens-Setup-x64.exe"
+          )
+          $lines = foreach ($file in $files) {
+            $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $([IO.Path]::GetFileName($file))"
+          }
+          $lines | Set-Content "release/SHA256SUMS.txt" -Encoding ascii
+
+      - name: Remove previous BOMLens artifacts
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate "repos/${{ github.repository }}/actions/artifacts" --jq '.artifacts[] | select(.name | startswith("BOMLens-")) | .id' |
+            ForEach-Object { gh api --method DELETE "repos/${{ github.repository }}/actions/artifacts/$_" }
+
+      - name: Upload portable ZIP
+        id: upload-portable
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: BOMLens-Windows-x64-Portable
+          path: |
+            release/BOMLens-Windows-x64-Portable.zip
+            release/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload setup EXE
+        id: upload-setup
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: BOMLens-Setup-x64
+          path: |
+            release/BOMLens-Setup-x64.exe
+            release/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish rolling Windows download fallback
+        if: steps.upload-portable.outcome == 'failure' || steps.upload-setup.outcome == 'failure'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "windows-latest"
+          $title = "BOMLens Windows 最新版"
+          $notes = "由 GitHub Actions 建置並驗證。來源提交：${{ github.sha }}"
+          gh release view $tag --repo "${{ github.repository }}" *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo "${{ github.repository }}" --target "${{ github.sha }}" --title $title --notes $notes --prerelease
+          } else {
+            gh release edit $tag --repo "${{ github.repository }}" --title $title --notes $notes --prerelease
+          }
+          gh release upload $tag --repo "${{ github.repository }}" --clobber `
+            "release/BOMLens-Windows-x64-Portable.zip" `
+            "release/BOMLens-Setup-x64.exe" `
+            "release/SHA256SUMS.txt"
+
+      - name: Publish download summary
+        if: always() && (steps.upload-portable.outcome == 'success' || steps.upload-setup.outcome == 'success' || steps.upload-portable.outcome == 'failure' || steps.upload-setup.outcome == 'failure')
+        shell: pwsh
+        run: |
+          if ("${{ steps.upload-portable.outcome }}" -eq "success" -and "${{ steps.upload-setup.outcome }}" -eq "success") {
+            "Windows 安裝檔已上傳至本次 workflow artifacts。" >> $env:GITHUB_STEP_SUMMARY
+          } else {
+            "GitHub Actions artifact 額度不足，Windows 安裝檔已改存至 [BOMLens Windows 最新版](https://github.com/${{ github.repository }}/releases/tag/windows-latest)。" >> $env:GITHUB_STEP_SUMMARY
+          }

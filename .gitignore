@@ -40,3 +40,15 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+
+# Confidential local inputs and generated reports
+*.xls
+*.xlsx
+*.xlsm
+*.csv
+*.pdf
+/input/
+/inputs/
+/uploads/
+/reports/
+/release/

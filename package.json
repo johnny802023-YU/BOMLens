@@ -1,22 +1,29 @@
 {
-  "name": "site-creator-vinext-starter",
+  "name": "bomlens-offline",
   "version": "0.1.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev",
-    "build": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
-    "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
+    "dev": "vinext dev",
+    "build": "vinext build",
+    "start": "vinext start",
+    "offline": "npm run build && npm run offline:serve",
+    "offline:serve": "vinext start --hostname 127.0.0.1 --port 3784",
+    "package:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows-portable.ps1",
+    "package:windows:setup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"& 'C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe' scripts\\BOMLens.iss\"",
     "test": "npm run build && node --test tests/rendered-html.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
+    "exceljs": "^4.4.0",
     "lucide-react": "^1.24.0",
     "next": "16.2.6",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^5.4.624",
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "xlsx": "^0.18.5"
